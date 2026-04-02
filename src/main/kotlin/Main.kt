@@ -79,53 +79,45 @@ fun main() {
 
             text {
                 val rawOriginal = message.text?.trim().orEmpty()
-                val raw = rawOriginal.lowercase(Locale("ru", "RU"))
+                val lower = rawOriginal.lowercase(Locale("ru", "RU"))
 
-                val prefix = raw.substringBefore(" ")
-
-                when (prefix) {
-                    BotTask.WEIGHT.taskName -> bot.handleTask(
-                        task = Task.Weight,
-                        rawText = rawOriginal,
-                        update = update,
-                        message = message,
-                        weightService = weightService,
-                        activityService = activityService,
-                        zoneId = zoneId
-                    )
-
-                    BotTask.GOAL.taskName -> bot.handleTask(
-                        task = Task.Goal,
-                        rawText = rawOriginal,
-                        update = update,
-                        message = message,
-                        weightService = weightService,
-                        activityService = activityService,
-                        zoneId = zoneId
-                    )
-
-                    BotTask.ACTIVITY.taskName -> bot.handleTask(
-                        task = Task.Activity,
-                        rawText = rawOriginal,
-                        update = update,
-                        message = message,
-                        weightService = weightService,
-                        activityService = activityService,
-                        zoneId = zoneId
-                    )
-
-                    BotTask.PROGRESS.taskName -> bot.handleTask(
-                        task = Task.Progress,
-                        rawText = rawOriginal,
-                        update = update,
-                        message = message,
-                        weightService = weightService,
-                        activityService = activityService,
-                        zoneId = zoneId
-                    )
-                    else -> {
-                        // игнорируем прочий текст
+                // Находим все команды в сообщении и их позиции
+                data class Hit(val pos: Int, val botTask: BotTask)
+                val hits = mutableListOf<Hit>()
+                for (bt in BotTask.values()) {
+                    val name = bt.taskName
+                    var from = 0
+                    while (true) {
+                        val idx = lower.indexOf(name, from)
+                        if (idx == -1) break
+                        val wordStart = idx == 0 || lower[idx - 1] == ' '
+                        val wordEnd = idx + name.length >= lower.length || lower[idx + name.length] == ' '
+                        if (wordStart && wordEnd) hits.add(Hit(idx, bt))
+                        from = idx + 1
                     }
+                }
+
+                hits.sortBy { it.pos }
+
+                // Каждой команде передаём её сегмент текста (от неё до следующей команды)
+                hits.forEachIndexed { i, hit ->
+                    val segEnd = if (i + 1 < hits.size) hits[i + 1].pos else rawOriginal.length
+                    val segment = rawOriginal.substring(hit.pos, segEnd).trim()
+                    val task = when (hit.botTask) {
+                        BotTask.WEIGHT   -> Task.Weight
+                        BotTask.GOAL     -> Task.Goal
+                        BotTask.ACTIVITY -> Task.Activity
+                        BotTask.PROGRESS -> Task.Progress
+                    }
+                    bot.handleTask(
+                        task = task,
+                        rawText = segment,
+                        update = update,
+                        message = message,
+                        weightService = weightService,
+                        activityService = activityService,
+                        zoneId = zoneId
+                    )
                 }
             }
         }
