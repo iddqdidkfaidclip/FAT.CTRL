@@ -3,9 +3,11 @@ package vc.fatfukkers.service
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.update
 import vc.fatfukkers.db.WeightEntries
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -22,27 +24,50 @@ class WeightService(private val zoneId: ZoneId) {
         val w = BigDecimal.valueOf(weightKg).setScale(2, RoundingMode.HALF_UP)
 
         return transaction {
-            val already = WeightEntries
+            val existing = WeightEntries
                 .selectAll()
                 .where { (WeightEntries.telegramUserId eq telegramUserId) and (WeightEntries.dateIso eq iso) }
                 .limit(1)
-                .count() > 0
+                .firstOrNull()
 
-            if (already) {
-                return@transaction ActionResult(
-                    ok = false,
-                    message = "\uD83E\uDEE2 ты уже сохранил свой вес $iso. Напиши завтра снова."
-                )
+            if (existing != null) {
+                val oldW = existing[WeightEntries.weightKg]
+                WeightEntries.update({
+                    (WeightEntries.telegramUserId eq telegramUserId) and (WeightEntries.dateIso eq iso)
+                }) {
+                    it[WeightEntries.weightKg] = w
+                    it[WeightEntries.createdAtEpochMs] = now
+                }
+                ActionResult(ok = true, message = "Обновил! $oldW → $w кг на $iso. \u270F\uFE0F")
+            } else {
+                WeightEntries.insert {
+                    it[WeightEntries.telegramUserId] = telegramUserId
+                    it[WeightEntries.dateIso] = iso
+                    it[WeightEntries.weightKg] = w
+                    it[WeightEntries.createdAtEpochMs] = now
+                }
+                ActionResult(ok = true, message = "Схоронил! $w кг на $iso. \uD83D\uDE42\u200D↕\uFE0F")
             }
+        }
+    }
 
-            WeightEntries.insert {
-                it[WeightEntries.telegramUserId] = telegramUserId
-                it[WeightEntries.dateIso] = iso
-                it[WeightEntries.weightKg] = w
-                it[WeightEntries.createdAtEpochMs] = now
-            }
+    fun cancelLastWeight(telegramUserId: Long): ActionResult {
+        return transaction {
+            val last = WeightEntries
+                .selectAll()
+                .where { WeightEntries.telegramUserId eq telegramUserId }
+                .orderBy(WeightEntries.dateIso to SortOrder.DESC)
+                .limit(1)
+                .firstOrNull()
+                ?: return@transaction ActionResult(ok = false, message = "Нет записей для удаления \uD83E\uDD37")
 
-            ActionResult(ok = true, message = "Схоронил! $w кг на $iso. \uD83D\uDE42\u200D↕\uFE0F")
+            val deletedW = last[WeightEntries.weightKg]
+            val deletedDate = last[WeightEntries.dateIso]
+            val deletedId = last[WeightEntries.id]
+
+            WeightEntries.deleteWhere { WeightEntries.id eq deletedId }
+
+            ActionResult(ok = true, message = "Удалил запись $deletedW кг от $deletedDate. \uD83D\uDDD1\uFE0F")
         }
     }
 

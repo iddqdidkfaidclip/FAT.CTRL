@@ -61,27 +61,33 @@ fun Bot.handleTask(
 
     when (task) {
         is Task.Weight -> {
-            val weight = Regex("""\d+([.,]\d+)?""").find(rawText)?.value
-            val w = weight?.replace(',', '.')?.toDoubleOrNull()
-            if (w == null) {
-                sendMessage(chatId, "$mention, \uD83E\uDEE8 напиши сколько! например: \"вес 99.9\"")
+            val lower = rawText.lowercase(java.util.Locale("ru", "RU"))
+            if (lower.contains("отмена")) {
+                val res = weightService.cancelLastWeight(u.telegramId)
+                sendMessage(chatId, "$mention, ${res.message}")
             } else {
-                if (w <= 0.0 || w > 200.0) {
-                    sendMessage(chatId, "$mention, хуйню то не неси \uD83E\uDDD0 напиши правду, например: \"вес 99.9\"")
-                    return
+                val weight = Regex("""\d+([.,]\d+)?""").find(rawText)?.value
+                val w = weight?.replace(',', '.')?.toDoubleOrNull()
+                if (w == null) {
+                    sendMessage(chatId, "$mention, \uD83E\uDEE8 напиши сколько! например: \"вес 99.9\"")
                 } else {
-                    val today = LocalDate.now(zoneId)
-                    val res = weightService.tryAddWeight(u.telegramId, today, w)
-                    if (res.ok) {
-                        val lastAfter = weightService.getLastWeight(u.telegramId)
-                        val goalNow = UserService.getGoalWeight(u.telegramId)
-                        val mentionAfterSave = buildMention(
-                            resolveStatusWord(current = lastAfter, goal = goalNow),
-                            resolveKgToNextStatus(current = lastAfter, goal = goalNow)
-                        )
-                        sendProgressWithChart(mentionAfterSave, prefixLine = res.message)
+                    if (w <= 0.0 || w > 200.0) {
+                        sendMessage(chatId, "$mention, хуйню то не неси \uD83E\uDDD0 напиши правду, например: \"вес 99.9\"")
+                        return
                     } else {
-                        sendMessage(chatId, "$mention, ${res.message}")
+                        val today = LocalDate.now(zoneId)
+                        val res = weightService.tryAddWeight(u.telegramId, today, w)
+                        if (res.ok) {
+                            val lastAfter = weightService.getLastWeight(u.telegramId)
+                            val goalNow = UserService.getGoalWeight(u.telegramId)
+                            val mentionAfterSave = buildMention(
+                                resolveStatusWord(current = lastAfter, goal = goalNow),
+                                resolveKgToNextStatus(current = lastAfter, goal = goalNow)
+                            )
+                            sendProgressWithChart(mentionAfterSave, prefixLine = res.message)
+                        } else {
+                            sendMessage(chatId, "$mention, ${res.message}")
+                        }
                     }
                 }
             }
