@@ -6,6 +6,8 @@ import com.github.kotlintelegrambot.entities.Message
 import com.github.kotlintelegrambot.entities.TelegramFile
 import com.github.kotlintelegrambot.entities.Update
 import vc.fatfukkers.service.ActivityService
+import vc.fatfukkers.service.ForecastResult
+import vc.fatfukkers.service.ForecastService
 import vc.fatfukkers.service.UserService
 import vc.fatfukkers.service.WeightChartService
 import vc.fatfukkers.service.WeightService
@@ -38,15 +40,24 @@ fun Bot.handleTask(
         resolveKgToNextStatus(current = current, goal = goalBefore)
     )
 
-    fun sendProgressWithChart(mentionStr: String, prefixLine: String? = null) {
+    fun sendProgressWithChart(
+        mentionStr: String,
+        prefixLine: String? = null,
+        forecast: ForecastResult? = null
+    ) {
         val progressMsg = weightService.getProgressMessage(u.telegramId)
         val caption = buildString {
             if (prefixLine != null) appendLine(prefixLine).appendLine()
             append(progressMsg)
+            if (!forecast?.message.isNullOrEmpty()) {
+                appendLine()
+                append(forecast!!.message)
+            }
         }
         val chartBytes = WeightChartService.buildChartBytes(
             telegramUserId = u.telegramId,
-            goal = UserService.getGoalWeight(u.telegramId)
+            goal = UserService.getGoalWeight(u.telegramId),
+            forecast = forecast
         )
         if (chartBytes != null) {
             sendPhoto(
@@ -97,7 +108,14 @@ fun Bot.handleTask(
             sendMessage(chatId, "$mention, $msg")
         }
         is Task.Progress -> {
-            sendProgressWithChart(mention)
+            val goalKg = UserService.getGoalWeight(u.telegramId)
+            val dataPoints = weightService.getWeightPoints(u.telegramId)
+            val forecast = ForecastService.compute(
+                dataPoints = dataPoints,
+                goal = goalKg?.toDouble(),
+                today = LocalDate.now(zoneId)
+            )
+            sendProgressWithChart(mention, forecast = forecast)
         }
         is Task.Goal -> {
             val num = Regex("""\d+([.,]\d+)?""").find(rawText)?.value

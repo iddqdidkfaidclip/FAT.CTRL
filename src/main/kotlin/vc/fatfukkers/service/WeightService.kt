@@ -127,6 +127,14 @@ class WeightService(private val zoneId: ZoneId) {
         }.trim()
     }
 
+    fun getWeightPoints(telegramUserId: Long): List<Pair<LocalDate, Double>> =
+        transaction {
+            WeightEntries.selectAll()
+                .where { WeightEntries.telegramUserId eq telegramUserId }
+                .orderBy(WeightEntries.dateIso to SortOrder.ASC)
+                .map { LocalDate.parse(it[WeightEntries.dateIso]) to it[WeightEntries.weightKg].toDouble() }
+        }
+
     fun getLastWeight(telegramUserId: Long) =
         transaction {
             WeightEntries
