@@ -90,14 +90,27 @@ fun main() {
                     while (true) {
                         val idx = lower.indexOf(name, from)
                         if (idx == -1) break
-                        val wordStart = idx == 0 || lower[idx - 1] == ' '
-                        val wordEnd = idx + name.length >= lower.length || lower[idx + name.length] == ' '
+                        val wordStart = idx == 0 || lower[idx - 1].isWhitespace()
+                        val wordEnd = idx + name.length >= lower.length || lower[idx + name.length].isWhitespace()
                         if (wordStart && wordEnd) hits.add(Hit(idx, bt))
                         from = idx + 1
                     }
                 }
 
                 hits.sortBy { it.pos }
+
+                // Сообщение обрабатывается только если оно начинается с команды
+                // и между командами нет посторонних слов (только пробелы/переносы и одно значение)
+                if (hits.isEmpty()) return@text
+                if (hits[0].pos != 0) return@text
+
+                val singleValueGap = Regex("""^\s*\S*\s*$""")
+                val allGapsClean = hits.mapIndexed { i, hit ->
+                    val gapStart = hit.pos + hit.botTask.taskName.length
+                    val gapEnd = if (i + 1 < hits.size) hits[i + 1].pos else rawOriginal.length
+                    singleValueGap.matches(rawOriginal.substring(gapStart, gapEnd))
+                }.all { it }
+                if (!allGapsClean) return@text
 
                 // Каждой команде передаём её сегмент текста (от неё до следующей команды)
                 hits.forEachIndexed { i, hit ->
