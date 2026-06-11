@@ -27,6 +27,7 @@ private val trainerWorker = Executors.newCachedThreadPool { runnable ->
 }
 
 private val showImageQueryPattern = Regex("""^\s*покажи(\s+|$)""", RegexOption.IGNORE_CASE)
+private val trainerThinkQueryPattern = Regex("""^подумай\b\s*""", RegexOption.IGNORE_CASE)
 fun Bot.handleTask(
     task: Task,
     rawText: String,
@@ -197,10 +198,19 @@ fun Bot.handleTask(
                 }
                 return
             }
+            val (trainerQuery, withThinking) = parseTrainerThinkQuery(query)
+            if (trainerQuery.isEmpty()) {
+                sendMessage(
+                    chatId = chatId,
+                    text = "напиши вопрос тренеру, например: «тренер как начать бегать?» или «тренер подумай как начать бегать?»",
+                    replyToMessageId = message.messageId
+                )
+                return
+            }
             val replyToMessageId = message.messageId
             val telegramUserId = u.telegramId
             trainerWorker.execute {
-                val answer = askTrainerWithTyping(chatId, telegramUserId, query)
+                val answer = askTrainerWithTyping(chatId, telegramUserId, trainerQuery, withThinking)
                 sendMessage(
                     chatId = chatId,
                     text = answer ?: "Я сейчас недоступна 💔 (скорее всего виноват Влад)",
@@ -246,7 +256,18 @@ private fun Bot.searchImageWithUploadPhoto(chatId: ChatId, imageQuery: String): 
     }
 }
 
-private fun Bot.askTrainerWithTyping(chatId: ChatId, telegramUserId: Long, query: String): String? {
+private fun parseTrainerThinkQuery(query: String): Pair<String, Boolean> {
+    val withThinking = trainerThinkQueryPattern.containsMatchIn(query)
+    val stripped = if (withThinking) trainerThinkQueryPattern.replace(query, "").trim() else query
+    return stripped to withThinking
+}
+
+private fun Bot.askTrainerWithTyping(
+    chatId: ChatId,
+    telegramUserId: Long,
+    query: String,
+    withThinking: Boolean,
+): String? {
     val stopTyping = AtomicBoolean(false)
     val typingThread = Thread {
         while (!stopTyping.get()) {
@@ -263,7 +284,7 @@ private fun Bot.askTrainerWithTyping(chatId: ChatId, telegramUserId: Long, query
     }
 
     return try {
-        TrainerService.ask(telegramUserId, query)
+        TrainerService.ask(telegramUserId, query, withThinking)
     } catch (_: Exception) {
         null
     } finally {

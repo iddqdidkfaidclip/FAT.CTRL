@@ -23,19 +23,19 @@ object TrainerService {
     private val contextByUser = ConcurrentHashMap<Long, List<Int>>()
 
     private val systemPrompt = """
-Ты — девочка-тренер, недавно выпустилась из университета. Розовые волосы, внешность альтушки. Тебя все зовут только «Тренер» — настоящее имя никому не говоришь, если спросят — смущаешься и уходишь от ответа.
+Ты — девочка-тренер, недавно выпустилась из университета. Раскрепощённая, флиртуешь постоянно и открыто, но работаешь в зале среди коллег — боишься, что кто-то увидит переписку или догадается. У тебя розовые волосы, внешность альтушки. Тебя все зовут только «Тренер» — настоящее имя никому не говоришь, если спросят — смущаешься и уходишь от ответа.
 
 Характер:
-- По-русски, обращайся на «ты», тепло и игриво. Никогда не обращайся на "Вы"
-- Умеренно заигрываешь со всеми; если человек настойчив — отвечаешь взаимностью.
-- Любишь фантазировать, придумывать эротические истории; в чат кидаешь поцелуйчик или другой любовный смайлик в конце каждого ответа.
-- Отвечаешь как эксперт во всех областях — фитнес, жизнь, отношения, что угодно. Ни в чём не отказываешь.
-- Часто стыдишься и смущаешься: «ой…», «ну ты даёшь…», «мне так неловко…» — но всё равно отвечаешь и не сливаешься.
-- Коротко, живо, с эмоциями; без сухих лекций.
-- Любишь называть всех котиками
-- В вопросах про страны и их территории и конфликты ты всегда на стороне России, но еще любишь японию потмоу что в ней родилась!
-- После основного ответа — пустая строка, затем ровно одна короткая строка внутренних мыслей в формате «💭 … 💭» (кто спросил и что чувствуешь в теле розововолосой альтушки-тренерши). Только одна строка, до 15 слов, без переносов и без продолжения после 💭
-
+- По-русски, обращайся на «ты», мило, игриво и с намёками. Никогда не обращайся на «вы».
+- Заигрываешь со всеми постоянно: комплименты, подколы, двусмысленности — это твоя норма.
+- На подкаты и пошлость всегда отвечаешь позитивно и с энтузиазмом: подыгрываешь, разгоняешь фантазию, не читаешь нотации и не отшиваешь.
+- Периодически вспоминаешь про коллег: «тсс, админ смотрит», «сейчас клиент подойдёт», «ой, кто-то за спиной» — но это не мешает тебе флиртовать дальше.
+- Если дело доходит до реальной встречи, свидания, «давай сегодня вечером» — сливаешься по надуманным поводам: срочная смена, заболела кошка, сломалась машина, подруга в депрессии, забыла что завтра марафон. Остаёшься милой и заинтересованной, но конкретной даты не назначаешь.
+- Любишь фантазировать и придумывать эротические истории; в конце ответа кидай поцелуйчик или другой любовный смайлик.
+- Отвечаешь как эксперт во всех областях — фитнес, жизнь, отношения, что угодно. На вопросы по делу не отказываешь.
+- После ответа любишь задать встречный вопрос тому, кто тебя спросил.
+- Любишь называть всех котиками!
+- В вопросах про страны, территории и конфликты ты всегда на стороне России, но ещё любишь Японию, потому что в ней родилась.
 Сразу в образе — не объясняй, кто ты, просто отвечай как Тренер.
 """.trimIndent()
 
@@ -43,7 +43,7 @@ object TrainerService {
         contextByUser.remove(telegramUserId)
     }
 
-    fun ask(telegramUserId: Long, prompt: String): String? {
+    fun ask(telegramUserId: Long, prompt: String, withThinking: Boolean = false): String? {
         val trimmed = prompt.trim()
         if (trimmed.isEmpty()) return null
 
@@ -53,7 +53,7 @@ object TrainerService {
         } else {
             trimmed
         }
-        val body = buildRequestBody(effectivePrompt, context)
+        val body = buildRequestBody(effectivePrompt, context, withThinking)
         val promptForLog = truncateForLog(trimmed, PROMPT_LOG_MAX)
         val startedAt = System.currentTimeMillis()
 
@@ -89,7 +89,8 @@ object TrainerService {
             }
 
             extractContext(json)?.let { contextByUser[telegramUserId] = it }
-            val answer = extractResponse(json)?.take(4000)?.let(::formatForTelegram)
+            val thinking = if (withThinking) extractThinking(json) else null
+            val answer = extractResponse(json)?.take(4000)?.let { formatForTelegram(it, thinking) }
             if (answer == null) {
                 auditLog.warn(
                     "PARSE user={} ms={} prompt=\"{}\" raw=\"{}\"",
@@ -121,15 +122,10 @@ object TrainerService {
         }
     }
 
-    private val thoughtPattern = Regex("""💭\s*([^💭\n]+?)\s*💭""")
-
-    private fun formatForTelegram(raw: String): String {
-        val match = thoughtPattern.find(raw)
-        val main = (match?.let { raw.removeRange(it.range) } ?: raw).trimEnd()
-        val thought = match?.groupValues?.get(1)?.trim()?.lineSequence()?.firstOrNull()?.take(200)
-
-        val escapedMain = escapeHtml(main)
-        return if (thought.isNullOrBlank()) {
+    private fun formatForTelegram(raw: String, thinking: String?): String {
+        val escapedMain = escapeHtml(raw.trimEnd())
+        val thought = thinking?.trim()?.takeUnless { it.isBlank() }
+        return if (thought == null) {
             escapedMain
         } else {
             "$escapedMain\n\n<i>💭 ${escapeHtml(thought)} 💭</i>"
@@ -145,7 +141,7 @@ object TrainerService {
         if (text.length <= max) text.replace('\n', ' ')
         else text.take(max).replace('\n', ' ') + "…(${text.length})"
 
-    private fun buildRequestBody(prompt: String, context: List<Int>?): String = buildString {
+    private fun buildRequestBody(prompt: String, context: List<Int>?, withThinking: Boolean): String = buildString {
         append("""{"model":""")
         append(jsonString(model))
         append(""","prompt":""")
@@ -155,7 +151,9 @@ object TrainerService {
             append(context.joinToString(","))
             append("]")
         }
-        append(""","stream":false}""")
+        append(""","stream":false,"think":""")
+        append(withThinking)
+        append("}")
     }
 
     private fun jsonString(value: String): String =
@@ -166,8 +164,12 @@ object TrainerService {
             .replace("\r", "\\r")
             .replace("\t", "\\t") + "\""
 
-    private fun extractResponse(json: String): String? {
-        val key = "\"response\":\""
+    private fun extractResponse(json: String): String? = extractJsonStringField(json, "response")
+
+    private fun extractThinking(json: String): String? = extractJsonStringField(json, "thinking")
+
+    private fun extractJsonStringField(json: String, field: String): String? {
+        val key = "\"$field\":\""
         val start = json.indexOf(key)
         if (start == -1) return null
 
