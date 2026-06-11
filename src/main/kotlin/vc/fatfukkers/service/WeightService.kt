@@ -38,7 +38,7 @@ class WeightService(private val zoneId: ZoneId) {
                     it[WeightEntries.weightKg] = w
                     it[WeightEntries.createdAtEpochMs] = now
                 }
-                ActionResult(ok = true, message = "Обновил! $oldW → $w кг на $iso. \u270F\uFE0F")
+                ActionResult(ok = true, message = "Обновила! $oldW → $w кг на $iso. \u270F\uFE0F")
             } else {
                 WeightEntries.insert {
                     it[WeightEntries.telegramUserId] = telegramUserId
@@ -46,7 +46,7 @@ class WeightService(private val zoneId: ZoneId) {
                     it[WeightEntries.weightKg] = w
                     it[WeightEntries.createdAtEpochMs] = now
                 }
-                ActionResult(ok = true, message = "Схоронил! $w кг на $iso. \uD83D\uDE42\u200D↕\uFE0F")
+                ActionResult(ok = true, message = "Записала! $w кг на $iso. \uD83D\uDE42\u200D↕\uFE0F")
             }
         }
     }
@@ -67,7 +67,7 @@ class WeightService(private val zoneId: ZoneId) {
 
             WeightEntries.deleteWhere { WeightEntries.id eq deletedId }
 
-            ActionResult(ok = true, message = "Удалил запись $deletedW кг от $deletedDate. \uD83D\uDDD1\uFE0F")
+            ActionResult(ok = true, message = "Удалила запись $deletedW кг от $deletedDate. \uD83D\uDDD1\uFE0F")
         }
     }
 
@@ -108,13 +108,13 @@ class WeightService(private val zoneId: ZoneId) {
                         val remaining = diffToGoal.setScale(1, RoundingMode.HALF_UP)
                         appendLine("\u2696\uFE0F Ты начинал с $f1 кг, уже $f2 кг!")
                         appendLine("\uD83C\uDFAF До цели осталось сбросить $remaining кг.")
-                        appendLine("\uD83D\uDD25 Худей братик, ХУДЕЙ!")
+                        appendLine("\uD83D\uDD25 Худей, котик, худей!")
                     }
                     else -> {
                         val remaining = diffToGoal.abs().setScale(1, RoundingMode.HALF_UP)
                         appendLine("\u2696\uFE0F Ты начинал с $f1 кг, уже $f2 кг!")
                         appendLine("\uD83C\uDFAF До цели осталось набрать $remaining кг.")
-                        appendLine("\uD83C\uDF54 Толстей братик, ТОЛСТЕЙ!")
+                        appendLine("\uD83C\uDF54 Набирай, котик, набирай!")
                     }
                 }
             } else {

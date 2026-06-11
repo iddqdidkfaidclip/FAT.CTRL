@@ -14,13 +14,26 @@ import vc.fatfukkers.handleTask
 import vc.fatfukkers.service.ActivityService
 import vc.fatfukkers.service.UserService
 import vc.fatfukkers.service.WeightService
+import java.nio.file.Files
+import java.nio.file.Paths
 import java.time.ZoneId
 import java.util.Locale
 
 private val logger = LoggerFactory.getLogger("FatCtrlBot")
 
+private fun isCommandBoundary(c: Char): Boolean =
+    c.isWhitespace() || c in ",.!?:;—-»«"
+
+private fun initTrainerLogPath() {
+    val path = System.getenv("TRAINER_LOG_PATH")?.trim().takeUnless { it.isNullOrBlank() }
+        ?: "./logs/trainer.log"
+    System.setProperty("TRAINER_LOG_PATH", path)
+    Paths.get(path).parent?.let { Files.createDirectories(it) }
+}
+
 fun main() {
     System.setProperty("java.awt.headless", "true")
+    initTrainerLogPath()
 
     val token = System.getenv("FATCTRL_BOT_TOKEN")?.trim().orEmpty()
     require(token.isNotBlank()) {
@@ -47,8 +60,8 @@ fun main() {
                 bot.sendMessage(
                     chatId = ChatId.fromId(message.chat.id),
                     text = """
-Привет 🐷 ты себя в зеркало видел? Давай подработаем над твоей талией!
-Я буду трекать твой вес — раз в день пиши сколько весишь, и вместе будем следить за прогрессом!
+Привет! Я твоя тренер 🩷 Обращайся ко мне по любому вопросу!
+Буду следить за твоим весом — раз в день пиши сколько весишь, и вместе будем кайфовать от прогресса!
 
 <b>📋 Команды:</b>
 
@@ -61,6 +74,11 @@ fun main() {
 📊 <b>прогресс</b> — посмотреть график и статистику
 
 🏋️ <b>задание</b> — получить физ. задание на сегодня
+
+🏋️‍♂️ <b>тренер …</b> — спросить ИИ-тренера
+   <i>пример: тренер как начать бегать?</i>
+   <i>картинка: тренер покажи ...</i>
+   <i>забыть диалог: тренер забудь / тренер забудь всё</i>
 
 <b>🏅 Звания (зависят от того сколько ты далёк от цели):</b>
 
@@ -90,8 +108,8 @@ fun main() {
                     while (true) {
                         val idx = lower.indexOf(name, from)
                         if (idx == -1) break
-                        val wordStart = idx == 0 || lower[idx - 1].isWhitespace()
-                        val wordEnd = idx + name.length >= lower.length || lower[idx + name.length].isWhitespace()
+                        val wordStart = idx == 0 || isCommandBoundary(lower[idx - 1])
+                        val wordEnd = idx + name.length >= lower.length || isCommandBoundary(lower[idx + name.length])
                         if (wordStart && wordEnd) hits.add(Hit(idx, bt))
                         from = idx + 1
                     }
@@ -105,10 +123,14 @@ fun main() {
                 if (hits[0].pos != 0) return@text
 
                 val singleValueGap = Regex("""^\s*\S*\s*$""")
+                fun gapMatches(botTask: BotTask, gap: String): Boolean = when (botTask) {
+                    BotTask.TRAINER -> gap.trim().isNotEmpty()
+                    else -> singleValueGap.matches(gap)
+                }
                 val allGapsClean = hits.mapIndexed { i, hit ->
                     val gapStart = hit.pos + hit.botTask.taskName.length
                     val gapEnd = if (i + 1 < hits.size) hits[i + 1].pos else rawOriginal.length
-                    singleValueGap.matches(rawOriginal.substring(gapStart, gapEnd))
+                    gapMatches(hit.botTask, rawOriginal.substring(gapStart, gapEnd))
                 }.all { it }
                 if (!allGapsClean) return@text
 
@@ -121,6 +143,7 @@ fun main() {
                         BotTask.GOAL     -> Task.Goal
                         BotTask.ACTIVITY -> Task.Activity
                         BotTask.PROGRESS -> Task.Progress
+                        BotTask.TRAINER  -> Task.Trainer
                     }
                     bot.handleTask(
                         task = task,

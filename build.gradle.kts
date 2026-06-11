@@ -41,3 +41,18 @@ kotlin {
 application {
     mainClass = "vc.fatfukkers.MainKt"
 }
+
+tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
+    archiveBaseName.set("fatctrlbot")
+    archiveClassifier.set("")
+    archiveVersion.set("")
+    manifest {
+        attributes["Main-Class"] = "vc.fatfukkers.MainKt"
+    }
+}
+
+tasks.register("fatJar") {
+    group = "build"
+    description = "Собрать fat-jar для деплоя на сервер → build/libs/fatctrlbot.jar"
+    dependsOn(tasks.named("shadowJar"))
+}

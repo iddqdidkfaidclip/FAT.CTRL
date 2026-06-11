@@ -1,13 +1,17 @@
 package vc.fatfukkers
 
 import com.github.kotlintelegrambot.Bot
+import com.github.kotlintelegrambot.entities.ChatAction
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.entities.Message
+import com.github.kotlintelegrambot.entities.ParseMode
 import com.github.kotlintelegrambot.entities.TelegramFile
 import com.github.kotlintelegrambot.entities.Update
 import vc.fatfukkers.service.ActivityService
 import vc.fatfukkers.service.ForecastResult
 import vc.fatfukkers.service.ForecastService
+import vc.fatfukkers.service.ImageSearchService
+import vc.fatfukkers.service.TrainerService
 import vc.fatfukkers.service.UserService
 import vc.fatfukkers.service.WeightChartService
 import vc.fatfukkers.service.WeightService
@@ -15,7 +19,14 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
+private val trainerWorker = Executors.newCachedThreadPool { runnable ->
+    Thread(runnable, "trainer-worker").apply { isDaemon = true }
+}
+
+private val showImageQueryPattern = Regex("""^\s*покажи(\s+|$)""", RegexOption.IGNORE_CASE)
 fun Bot.handleTask(
     task: Task,
     rawText: String,
@@ -132,6 +143,72 @@ fun Bot.handleTask(
                 sendMessage(chatId, "$mentionAfter, $msg")
             }
         }
+        is Task.Trainer -> {
+            val query = rawText
+                .replace(Regex("тренер", RegexOption.IGNORE_CASE), "")
+                .trim()
+                .replace(Regex("^[,.!?:;—-]+\\s*"), "")
+                .trim()
+            if (query.isEmpty()) {
+                sendMessage(
+                    chatId = chatId,
+                    text = "напиши вопрос тренеру, например: «тренер как начать бегать?»",
+                    replyToMessageId = message.messageId
+                )
+                return
+            }
+            val forgetQuery = query.lowercase(java.util.Locale("ru", "RU"))
+            if (forgetQuery == "забудь" || forgetQuery == "забудь всё" || forgetQuery == "забудь все") {
+                TrainerService.resetContext(u.telegramId)
+                sendMessage(
+                    chatId = chatId,
+                    text = "тренер забыла прошлый разговор — начинаем с чистого листа",
+                    replyToMessageId = message.messageId
+                )
+                return
+            }
+            if (showImageQueryPattern.containsMatchIn(forgetQuery)) {
+                val imageQuery = query.replace(Regex("^\\s*покажи\\s*", RegexOption.IGNORE_CASE), "").trim()
+                if (imageQuery.isEmpty()) {
+                    sendMessage(
+                        chatId = chatId,
+                        text = "напиши что показать, например: «тренер покажи котика»",
+                        replyToMessageId = message.messageId
+                    )
+                    return
+                }
+                val replyToMessageId = message.messageId
+                trainerWorker.execute {
+                    val bytes = searchImageWithUploadPhoto(chatId, imageQuery)
+                    if (bytes == null) {
+                        sendMessage(
+                            chatId = chatId,
+                            text = "ничего не нашла по запросу «$imageQuery»",
+                            replyToMessageId = replyToMessageId
+                        )
+                    } else {
+                        val ext = ImageSearchService.extensionFor(bytes)
+                        sendPhoto(
+                            chatId = chatId,
+                            photo = TelegramFile.ByByteArray(bytes, "image.$ext"),
+                            replyToMessageId = replyToMessageId
+                        )
+                    }
+                }
+                return
+            }
+            val replyToMessageId = message.messageId
+            val telegramUserId = u.telegramId
+            trainerWorker.execute {
+                val answer = askTrainerWithTyping(chatId, telegramUserId, query)
+                sendMessage(
+                    chatId = chatId,
+                    text = answer ?: "Я сейчас недоступна 💔 (скорее всего виноват Влад)",
+                    parseMode = ParseMode.HTML,
+                    replyToMessageId = replyToMessageId
+                )
+            }
+        }
     }
 }
 
@@ -140,13 +217,67 @@ sealed class Task {
     data object Activity : Task()
     data object Progress : Task()
     data object Goal : Task()
+    data object Trainer : Task()
+}
+
+private fun Bot.searchImageWithUploadPhoto(chatId: ChatId, imageQuery: String): ByteArray? {
+    val stopUpload = AtomicBoolean(false)
+    val uploadThread = Thread {
+        while (!stopUpload.get()) {
+            sendChatAction(chatId, ChatAction.UPLOAD_PHOTO)
+            try {
+                Thread.sleep(4_000)
+            } catch (_: InterruptedException) {
+                break
+            }
+        }
+    }.apply {
+        isDaemon = true
+        start()
+    }
+
+    return try {
+        ImageSearchService.searchImageBytes(imageQuery)
+    } catch (_: Exception) {
+        null
+    } finally {
+        stopUpload.set(true)
+        uploadThread.interrupt()
+    }
+}
+
+private fun Bot.askTrainerWithTyping(chatId: ChatId, telegramUserId: Long, query: String): String? {
+    val stopTyping = AtomicBoolean(false)
+    val typingThread = Thread {
+        while (!stopTyping.get()) {
+            sendChatAction(chatId, ChatAction.TYPING)
+            try {
+                Thread.sleep(4_000)
+            } catch (_: InterruptedException) {
+                break
+            }
+        }
+    }.apply {
+        isDaemon = true
+        start()
+    }
+
+    return try {
+        TrainerService.ask(telegramUserId, query)
+    } catch (_: Exception) {
+        null
+    } finally {
+        stopTyping.set(true)
+        typingThread.interrupt()
+    }
 }
 
 enum class BotTask(val taskName: String) {
     WEIGHT("вес"),
     ACTIVITY("задание"),
     PROGRESS("прогресс"),
-    GOAL("цель")
+    GOAL("цель"),
+    TRAINER("тренер")
 }
 
 private fun resolveStatusWord(current: BigDecimal?, goal: BigDecimal?): String {

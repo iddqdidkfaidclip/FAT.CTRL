@@ -53,7 +53,7 @@ class WeightServiceTest {
         val result = service.tryAddWeight(userId, today, 98.5)
 
         assertTrue(result.ok)
-        assertTrue(result.message.contains("Схоронил"))
+        assertTrue(result.message.contains("Записала"))
         assertTrue(result.message.contains("98.50"))
     }
 
@@ -63,7 +63,7 @@ class WeightServiceTest {
         val result = service.tryAddWeight(userId, today, 97.0)
 
         assertTrue(result.ok)
-        assertTrue(result.message.contains("Обновил"), "Ожидали 'Обновил', получили: ${result.message}")
+        assertTrue(result.message.contains("Обновила"), "Ожидали 'Обновила', получили: ${result.message}")
         assertTrue(result.message.contains("98.50 → 97.00"))
 
         // В БД должна остаться одна запись с новым весом
@@ -77,7 +77,7 @@ class WeightServiceTest {
         val result = service.tryAddWeight(userId, today, 98.0)
 
         assertTrue(result.ok)
-        assertTrue(result.message.contains("Схоронил"))
+        assertTrue(result.message.contains("Записала"))
 
         val last = service.getLastWeight(userId)
         assertEquals(BigDecimal("98.00"), last)

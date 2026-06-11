@@ -37,14 +37,14 @@ class ActivityService(private val zoneId: ZoneId) {
                 val reps = existing[DailyAssignments.reps]
                 return@transaction AssignmentResult(
                     ok = true,
-                    message = "Сегодня ($iso) для тебя:\n$reps × $activity\n(Уже назначено на сегодня, отдохни до завтра) \uD83D\uDE1C"
+                    message = "Сегодня ($iso) для тебя:\n$reps × $activity\n(Я уже назначала на сегодня — отдохни до завтра) \uD83D\uDE1C"
                 )
             }
 
             val activityRow = pickRandomActiveActivity()
                 ?: return@transaction AssignmentResult(
                     ok = false,
-                    message = "Нет активностей, зовите админа!"
+                    message = "Я не нашла активностей — зови админа!"
                 )
 
             val activityId = activityRow[Activities.id].value
@@ -62,7 +62,7 @@ class ActivityService(private val zoneId: ZoneId) {
                 it[DailyAssignments.createdAtEpochMs] = now
             }
 
-            AssignmentResult(ok = true, message = "Сегодня ($iso) для тебя:\n$reps × $name \uD83D\uDE0A")
+            AssignmentResult(ok = true, message = "Я назначила на сегодня ($iso):\n$reps × $name \uD83D\uDE0A")
         }
     }
 
