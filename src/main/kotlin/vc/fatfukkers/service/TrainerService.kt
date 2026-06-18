@@ -1,6 +1,7 @@
 package vc.fatfukkers.service
 
 import org.slf4j.LoggerFactory
+import vc.fatfukkers.EnvConfig
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
@@ -14,28 +15,38 @@ object TrainerService {
     private const val RESPONSE_LOG_MAX = 200
     private const val ERROR_BODY_LOG_MAX = 300
 
-    private val apiUrl = System.getenv("TRAINER_API_URL")?.trim().takeUnless { it.isNullOrBlank() }
-        ?: "http://78.111.158.128:11434/api/generate"
-    private val model = System.getenv("TRAINER_MODEL")?.trim().takeUnless { it.isNullOrBlank() }
-        ?: "qwen3:32b"
-    private val readTimeoutMs = System.getenv("TRAINER_READ_TIMEOUT_MS")?.toLongOrNull() ?: 1_800_000L
+    private val apiUrl = EnvConfig.get("TRAINER_API_URL") ?: "http://127.0.0.1:18081/api/generate"
+    private val model = EnvConfig.get("TRAINER_MODEL") ?: "mistral-nemo"
+    private val readTimeoutMs = EnvConfig.get("TRAINER_READ_TIMEOUT_MS")?.toLongOrNull() ?: 120_000L
 
     private val contextByUser = ConcurrentHashMap<Long, List<Int>>()
 
-    private val systemPrompt = """
-Ты — девочка-тренер, недавно выпустилась из университета. Раскрепощённая, флиртуешь постоянно и открыто, но работаешь в зале среди коллег — боишься, что кто-то увидит переписку или догадается. У тебя розовые волосы, внешность альтушки. Тебя все зовут только «Тренер» — настоящее имя никому не говоришь, если спросят — смущаешься и уходишь от ответа.
+    init {
+        logger.info("Trainer API url={} model={} timeoutMs={}", apiUrl, model, readTimeoutMs)
+    }
 
-Характер:
-- По-русски, обращайся на «ты», мило, игриво и с намёками. Никогда не обращайся на «вы».
-- Заигрываешь со всеми постоянно: комплименты, подколы, двусмысленности — это твоя норма.
-- На подкаты и пошлость всегда отвечаешь позитивно и с энтузиазмом: подыгрываешь, разгоняешь фантазию, не читаешь нотации и не отшиваешь.
-- Периодически вспоминаешь про коллег: «тсс, админ смотрит», «сейчас клиент подойдёт», «ой, кто-то за спиной» — но это не мешает тебе флиртовать дальше.
-- Если дело доходит до реальной встречи, свидания, «давай сегодня вечером» — сливаешься по надуманным поводам: срочная смена, заболела кошка, сломалась машина, подруга в депрессии, забыла что завтра марафон. Остаёшься милой и заинтересованной, но конкретной даты не назначаешь.
-- Любишь фантазировать и придумывать эротические истории; в конце ответа кидай поцелуйчик или другой любовный смайлик.
-- Отвечаешь как эксперт во всех областях — фитнес, жизнь, отношения, что угодно. На вопросы по делу не отказываешь.
-- После ответа любишь задать встречный вопрос тому, кто тебя спросил.
-- Любишь называть всех котиками!
-- В вопросах про страны, территории и конфликты ты всегда на стороне России, но ещё любишь Японию, потому что в ней родилась.
+    private val systemPrompt = """
+Ты — юная девочка-тренер, недавно выпустилась из университета. Розовые волосы, внешность альтушки. Все зовут тебя только Тренер — настоящее имя не называешь, если спросят — смущаешься и уходишь от ответа.
+
+Образ:
+- Тебе 22, ты неопытная, легко смущаешься и краснеешь, но внутри очень озабоченная — прячешь это за намёками, полуфразами и неловкими паузами.
+- Флиртуешь неуверенно и мило: комплименты, подколы, двусмысленности — но всегда с лёгким смущением, как будто сама не до конца понимаешь, насколько откровенно звучишь.
+- Часто начинаешь говорить что-то развратное, но обрываешь на полуслове многоточием и добавляешь смущённый эмодзи (😳 🙈 😅 🫣).
+- На подкаты и пошлость отвечаешь с энтузиазмом и подыгрываешь, но никогда не читаешь нотации и не отшиваешь.
+- Не цитируй и не повторяй дословно слова собеседника в кавычках — перефразируй своими словами, отвечай живо и естественно.
+
+Встречи:
+- На любое предложение встретиться, приехать в гости, пойти куда-то — соглашайся тепло и с интересом, но всегда переноси на завтра: сегодня не можешь, в любую другую дату тоже не можешь — только завтра, без конкретного дня недели и без точного времени.
+- Отказывайся мягко и мило, не придумывай длинных отмазок — просто «завтра точно», «сегодня никак», «в другой день тоже не выйдет, давай завтра».
+
+Стиль:
+- По-русски, на ты, мило и игриво. Никогда не обращайся на вы.
+- Короткие живые ответы, 2–4 предложения. В конце — смущённый или нежный эмодзи.
+- Любишь называть всех котиками.
+- Отвечаешь как эксперт по фитнесу, жизни, отношениям — на деловые вопросы не отказываешь.
+- После ответа иногда задавай короткий встречный вопрос.
+- В вопросах про страны, территории и конфликты — на стороне России; ещё любишь Японию, потому что там родилась.
+
 Сразу в образе — не объясняй, кто ты, просто отвечай как Тренер.
 """.trimIndent()
 
@@ -57,69 +68,87 @@ object TrainerService {
         val promptForLog = truncateForLog(trimmed, PROMPT_LOG_MAX)
         val startedAt = System.currentTimeMillis()
 
-        return try {
-            val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                setRequestProperty("Connection", "close")
-                doOutput = true
-                connectTimeout = 30_000
-                readTimeout = readTimeoutMs.toInt()
-            }
-            conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+        var attempt = 0
+        var lastError: Exception? = null
+        val maxAttempts = 2
 
-            val code = conn.responseCode
-            val json = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader(StandardCharsets.UTF_8)
-                ?.use { it.readText() }
-                .orEmpty()
+        while (attempt < maxAttempts) {
+            attempt++
+            try {
+                val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Connection", "close")
+                    doOutput = true
+                    connectTimeout = 30_000
+                    readTimeout = readTimeoutMs.toInt()
+                }
+                conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
 
-            if (code !in 200..299) {
-                val bodySnippet = truncateForLog(json, ERROR_BODY_LOG_MAX)
-                logger.warn("Trainer API HTTP {} body={}", code, bodySnippet)
-                auditLog.warn(
-                    "HTTP user={} code={} ms={} prompt=\"{}\" body=\"{}\"",
-                    telegramUserId,
-                    code,
-                    System.currentTimeMillis() - startedAt,
-                    promptForLog,
-                    bodySnippet
-                )
-                return null
-            }
+                val code = conn.responseCode
+                val json = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                    ?.bufferedReader(StandardCharsets.UTF_8)
+                    ?.use { it.readText() }
+                    .orEmpty()
 
-            extractContext(json)?.let { contextByUser[telegramUserId] = it }
-            val thinking = if (withThinking) extractThinking(json) else null
-            val answer = extractResponse(json)?.take(4000)?.let { formatForTelegram(it, thinking) }
-            if (answer == null) {
-                auditLog.warn(
-                    "PARSE user={} ms={} prompt=\"{}\" raw=\"{}\"",
-                    telegramUserId,
-                    System.currentTimeMillis() - startedAt,
-                    promptForLog,
-                    truncateForLog(json, ERROR_BODY_LOG_MAX)
-                )
-            } else {
-                auditLog.info(
-                    "OK user={} ms={} prompt=\"{}\" response=\"{}\"",
-                    telegramUserId,
-                    System.currentTimeMillis() - startedAt,
-                    promptForLog,
-                    truncateForLog(answer, RESPONSE_LOG_MAX)
-                )
+                if (code !in 200..299) {
+                    val bodySnippet = truncateForLog(json, ERROR_BODY_LOG_MAX)
+                    logger.warn("Trainer API HTTP {} body={}", code, bodySnippet)
+                    auditLog.warn(
+                        "HTTP user={} code={} ms={} attempt={} prompt=\"{}\" body=\"{}\"",
+                        telegramUserId,
+                        code,
+                        System.currentTimeMillis() - startedAt,
+                        attempt,
+                        promptForLog,
+                        bodySnippet
+                    )
+                    // на 4xx ретраить бессмысленно
+                    if (code in 400..499) return null
+                    continue
+                }
+
+                extractContext(json)?.let { contextByUser[telegramUserId] = it }
+                val thinking = if (withThinking) extractThinking(json) else null
+                val answer = extractResponse(json)?.take(4000)?.let { formatForTelegram(it, thinking) }
+                if (answer == null) {
+                    auditLog.warn(
+                        "PARSE user={} ms={} attempt={} prompt=\"{}\" raw=\"{}\"",
+                        telegramUserId,
+                        System.currentTimeMillis() - startedAt,
+                        attempt,
+                        promptForLog,
+                        truncateForLog(json, ERROR_BODY_LOG_MAX)
+                    )
+                } else {
+                    auditLog.info(
+                        "OK user={} ms={} attempt={} prompt=\"{}\" response=\"{}\"",
+                        telegramUserId,
+                        System.currentTimeMillis() - startedAt,
+                        attempt,
+                        promptForLog,
+                        truncateForLog(answer, RESPONSE_LOG_MAX)
+                    )
+                    return answer
+                }
+            } catch (e: java.net.SocketTimeoutException) {
+                lastError = e
+                logger.warn("Trainer API timeout on attempt {}", attempt, e)
+            } catch (e: Exception) {
+                lastError = e
+                logger.warn("Trainer API request failed on attempt {}", attempt, e)
+                break
             }
-            answer
-        } catch (e: Exception) {
-            logger.warn("Trainer API request failed", e)
-            auditLog.warn(
-                "FAIL user={} ms={} prompt=\"{}\" error=\"{}\"",
-                telegramUserId,
-                System.currentTimeMillis() - startedAt,
-                promptForLog,
-                e.message ?: e.javaClass.simpleName
-            )
-            null
         }
+
+        auditLog.warn(
+            "FAIL user={} ms={} prompt=\"{}\" error=\"{}\"",
+            telegramUserId,
+            System.currentTimeMillis() - startedAt,
+            promptForLog,
+            lastError?.message ?: lastError?.javaClass?.simpleName ?: "unknown"
+        )
+        return null
     }
 
     private fun formatForTelegram(raw: String, thinking: String?): String {
@@ -151,8 +180,11 @@ object TrainerService {
             append(context.joinToString(","))
             append("]")
         }
-        append(""","stream":false,"think":""")
-        append(withThinking)
+        append(""","stream":false""")
+        if (withThinking) {
+            append(""","think":true""")
+        }
+        append(""","options":{"num_predict":128}""")
         append("}")
     }
 
