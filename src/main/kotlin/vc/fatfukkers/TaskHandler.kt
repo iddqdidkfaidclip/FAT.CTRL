@@ -213,7 +213,7 @@ fun Bot.handleTask(
                 val answer = askTrainerWithTyping(chatId, telegramUserId, trainerQuery, withThinking)
                 sendMessage(
                     chatId = chatId,
-                    text = answer ?: "Я сейчас недоступна 💔 (скорее всего виноват Влад)",
+                    text = answer ?: "Я сейчас недоступна 💔 (скорее всего виноват Макс)",
                     parseMode = ParseMode.HTML,
                     replyToMessageId = replyToMessageId
                 )
