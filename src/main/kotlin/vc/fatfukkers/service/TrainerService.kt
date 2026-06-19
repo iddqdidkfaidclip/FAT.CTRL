@@ -161,7 +161,7 @@ object TrainerService {
 
                 extractContext(json)?.let { contextByUser[telegramUserId] = it }
                 val thinking = if (withThinking) extractThinking(json)?.let(::filterLeakedContent) else null
-                val rawAnswer = extractResponse(json)?.take(4000)?.let(::filterLeakedContent)
+                val rawAnswer = extractResponse(json)?.let(::filterLeakedContent)
                 val answer = rawAnswer?.let { formatForTelegram(it, thinking) }
                 if (answer == null) {
                     auditLog.warn(
@@ -288,7 +288,6 @@ object TrainerService {
         if (withThinking) {
             append(""","think":true""")
         }
-        append(""","options":{"num_predict":128}""")
         append("}")
     }
 
