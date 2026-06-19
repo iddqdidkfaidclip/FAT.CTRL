@@ -10,9 +10,12 @@ import org.slf4j.LoggerFactory
 import vc.fatfukkers.db.Db
 import vc.fatfukkers.BotTask
 import vc.fatfukkers.Task
+import vc.fatfukkers.detectVideoUrl
 import vc.fatfukkers.handleTask
+import vc.fatfukkers.handleVideoDownload
 import vc.fatfukkers.service.ActivityService
 import vc.fatfukkers.service.UserService
+import vc.fatfukkers.service.VideoDownloadService
 import vc.fatfukkers.service.WeightService
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -43,6 +46,10 @@ private fun commandsHelpText(): String = """
    <i>картинка: тренер покажи ...</i>
    <i>забыть диалог: тренер забудь / тренер забудь всё</i>
 
+📥 <b>ссылка YouTube / Instagram</b> — скачать видео
+   <i>просто отправь ссылку первой в сообщении</i>
+   <i>пример: https://youtube.com/watch?v=...</i>
+
 <b>🏅 Звания (зависят от того сколько ты далёк от цели):</b>
 
 🥇 <b>достигший цели</b> — цель достигнута, поздравляю!
@@ -65,6 +72,7 @@ private fun initTrainerLogPath() {
 fun main() {
     System.setProperty("java.awt.headless", "true")
     initTrainerLogPath()
+    VideoDownloadService.onStartup()
 
     val token = System.getenv("FATCTRL_BOT_TOKEN")?.trim().orEmpty()
     require(token.isNotBlank()) {
@@ -112,6 +120,15 @@ ${commandsHelpText()}
             text {
                 val rawOriginal = message.text?.trim().orEmpty()
                 val lower = rawOriginal.lowercase(Locale("ru", "RU"))
+
+                detectVideoUrl(rawOriginal)?.let { videoUrl ->
+                    bot.handleVideoDownload(
+                        url = videoUrl,
+                        update = update,
+                        message = message,
+                    )
+                    return@text
+                }
 
                 // Находим все команды в сообщении и их позиции
                 data class Hit(val pos: Int, val botTask: BotTask)
