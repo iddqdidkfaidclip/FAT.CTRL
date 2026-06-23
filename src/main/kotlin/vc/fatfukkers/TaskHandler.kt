@@ -272,11 +272,7 @@ private fun Bot.askTrainerWithTyping(
     val typingThread = Thread {
         while (!stopTyping.get()) {
             sendChatAction(chatId, ChatAction.TYPING)
-            try {
-                Thread.sleep(4_000)
-            } catch (_: InterruptedException) {
-                break
-            }
+            if (sleepUntil(stopTyping, 4_000)) break
         }
     }.apply {
         isDaemon = true
@@ -291,6 +287,20 @@ private fun Bot.askTrainerWithTyping(
         stopTyping.set(true)
         typingThread.interrupt()
     }
+}
+
+private fun sleepUntil(stop: AtomicBoolean, ms: Long): Boolean {
+    val deadline = System.currentTimeMillis() + ms
+    while (!stop.get()) {
+        val remaining = deadline - System.currentTimeMillis()
+        if (remaining <= 0) return false
+        try {
+            Thread.sleep(minOf(remaining, 500))
+        } catch (_: InterruptedException) {
+            return true
+        }
+    }
+    return true
 }
 
 enum class BotTask(val taskName: String) {

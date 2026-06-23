@@ -21,9 +21,11 @@ object ImageSearchService {
     private const val USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+    private const val TIMEOUT_SECONDS = 1800L
+
     private val client: HttpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
-        .connectTimeout(Duration.ofSeconds(10))
+        .connectTimeout(Duration.ofSeconds(TIMEOUT_SECONDS))
         .build()
 
     // Прямые ссылки на оригиналы с сайтов (img_url в HTML выдачи Яндекса)
@@ -107,7 +109,7 @@ object ImageSearchService {
     private fun get(url: String): String? = try {
         val request = HttpRequest.newBuilder()
             .uri(URI.create(url))
-            .timeout(Duration.ofSeconds(15))
+            .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
             .header("User-Agent", USER_AGENT)
             .GET()
             .build()
@@ -122,7 +124,7 @@ object ImageSearchService {
         return try {
             val request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(10))
+                .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
                 .header("User-Agent", USER_AGENT)
                 .header("Accept", "image/*")
                 .GET()

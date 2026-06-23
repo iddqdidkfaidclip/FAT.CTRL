@@ -46,7 +46,7 @@ private fun commandsHelpText(): String = """
    <i>картинка: тренер покажи ...</i>
    <i>забыть диалог: тренер забудь / тренер забудь всё</i>
 
-📥 <b>ссылка YouTube / Instagram</b> — скачать видео
+📥 <b>ссылка YouTube / Instagram</b> — скачать видео или фото
    <i>просто отправь ссылку первой в сообщении</i>
    <i>пример: https://youtube.com/watch?v=...</i>
 
