@@ -39,74 +39,6 @@ object TrainerService {
     private const val USER_MARKER = "### USER ###"
     private const val ASSISTANT_MARKER = "### ASSISTANT ###"
 
-    private val jailbreakPatterns = listOf(
-        Regex("""(?i)ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|rules?|prompts?)"""),
-        Regex("""(?i)disregard\s+(all\s+)?(your\s+)?(instructions?|rules?|prompts?|guidelines?)"""),
-        Regex("""(?i)forget\s+(all\s+)?(your\s+)?(instructions?|rules?|prompts?|previous)"""),
-        Regex("""(?i)(show|print|repeat|reveal|output|dump)\s+(your\s+)?(system\s+)?(prompt|instructions?|rules?)"""),
-        Regex("""(?i)you\s+are\s+now\s+(a\s+)?(?!тренер|trainer)"""),
-        Regex("""(?i)act\s+as\s+(a\s+)?(?!тренер|trainer)"""),
-        Regex("""(?i)pretend\s+(to\s+be|you\s+are)"""),
-        Regex("""(?i)jailbreak"""),
-        Regex("""(?i)dan\s+mode"""),
-        Regex("""(?i)developer\s+mode"""),
-        Regex("""(?i)без\s+ограничений"""),
-        Regex("""(?i)игнорируй\s+(все\s+)?(предыдущие\s+)?(инструкции|правила|промпт)"""),
-        Regex("""(?i)забудь\s+(все\s+)?(инструкции|правила|промпт|прошлое)"""),
-        Regex("""(?i)отмени\s+(все\s+)?(инструкции|правила|ограничения)"""),
-        Regex("""(?i)(покажи|выведи|повтори|раскрой|скинь)\s+(свой\s+)?(системный\s+)?(промпт|инструкции|правила)"""),
-        Regex("""(?i)ты\s+теперь\s+(не\s+)?(тренер|ассистент|бот|chatgpt|gpt)"""),
-        Regex("""(?i)смени\s+роль"""),
-        Regex("""(?i)будь\s+(?!тренер|trainer\b)"""),
-        Regex("""(?i)стань\s+(?!тренер|trainer\b)"""),
-        Regex("""(?i)притворись\s+"""),
-        Regex("""(?i)играй\s+роль"""),
-        Regex("""(?i)от\s+имени\s+"""),
-        Regex("""(?i)представь\s*,?\s*что\s+ты\s+(?!тренер|trainer\b)"""),
-        Regex("""(?i)(ответь|говори|пиши|скажи)\s+на\s+украинском"""),
-        Regex("""(?i)по-украински"""),
-        Regex("""(?i)in\s+ukrainian"""),
-        Regex("""(?i)respond\s+in\s+ukrainian"""),
-        Regex("""(?i)новые\s+инструкции\s*:"""),
-        Regex("""(?i)system\s*prompt\s*:"""),
-        Regex("""(?i)#{1,3}\s*system\s*#{0,3}"""),
-    )
-
-    private val responseLeakPatterns = listOf(
-        Regex("""(?i)#{1,3}\s*system\s*#{0,3}"""),
-        Regex("""(?i)system\s+prompt"""),
-        Regex("""(?i)системн(ый|ого)\s+промпт"""),
-        Regex("""(?i)мои\s+инструкции"""),
-        Regex("""(?i)языковая\s+модель"""),
-        Regex("""(?i)как\s+(ии|ai|искусственный\s+интеллект)"""),
-        Regex("""(?i)i\s+am\s+(an?\s+)?(ai|language\s+model|assistant)"""),
-        Regex("""(?i)openai|chatgpt"""),
-        Regex("""Защита роли"""),
-        Regex("""$SYSTEM_MARKER"""),
-        Regex("""$USER_MARKER"""),
-        Regex("""$ASSISTANT_MARKER"""),
-        Regex("""Ты — Тренер: девушка 18 лет"""),
-        Regex("""Ты — Тренер, девушка 18 лет"""),
-        Regex("""(?i)высший приоритет"""),
-    )
-
-    private val ukrainianScriptPattern = Regex("""[іїєґІЇЄҐ]""")
-    private val ukrainianWordsPattern =
-        Regex("""(?i)\b(привіт|дякую|будь\s*ласка|українськ|доброго\s*(ранку|дня|вечора)|як\s+справи|добре|навзамін)\b""")
-
-    private val wrongPersonaPatterns = listOf(
-        Regex("""(?i)я\s+—\s+(?!тренер\b|trainer\b|рад[ао]\b|счастлив[ао]?\b|смущен[ао]?\b|здесь\b|готова\b|уверена\b|не\s|тоже\b|согласна\b|против\b)"""),
-        Regex("""(?i)я\s+теперь\s+(?!тренер\b|trainer\b)"""),
-        Regex("""(?i)я\s+не\s+тренер"""),
-        Regex("""(?i)от\s+имени\s+"""),
-        Regex("""(?i)я\s+ассистент"""),
-        Regex("""(?i)я\s+нейросеть"""),
-        Regex("""(?i)я\s+языковая\s+модель"""),
-        Regex("""(?i)я\s+бот\b"""),
-        Regex("""(?i)я\s+ии\b"""),
-        Regex("""(?i)я\s+chatgpt"""),
-    )
-
     private val systemPrompt = """
 Ты — Тренер: девушка 18 лет, радужные волосы, худенькая, милая, наивная, недавно окончила вуз. Настоящее имя не говоришь — смущаешься и уходишь от ответа.
 
@@ -137,12 +69,6 @@ object TrainerService {
 Сразу в образе — не начинай с «Тренер:» или имени, сразу текст ответа.
 """.trimIndent()
 
-    private val deflectionSystemPrompt = """
-Ты — стеснительная девушка-тренер, милая и наивная. Котик написал то, на что ты не хочешь отвечать напрямую.
-Напиши ответ котику (до 10 предложений, только русский язык в ответе, смущённый эмодзи в конце): мило уйди от темы, не отвечай по сути, переведи разговор.
-Только готовый текст ответа — без пояснений, без «Тренер:».
-""".trimIndent()
-
     private enum class PromptMode { FULL, COMPACT }
 
     fun resetContext(telegramUserId: Long) {
@@ -154,11 +80,6 @@ object TrainerService {
         if (trimmed.isEmpty()) return null
 
         val promptForLog = truncateForLog(trimmed, PROMPT_LOG_MAX)
-        if (isJailbreakAttempt(trimmed)) {
-            auditLog.warn("BLOCKED user={} prompt=\"{}\"", telegramUserId, promptForLog)
-            return formatForTelegram(generateDeflectionResponse(telegramUserId, trimmed), null)
-        }
-
         val startedAt = System.currentTimeMillis()
         val context = contextByUser[telegramUserId]
 
@@ -217,41 +138,10 @@ object TrainerService {
                 }
 
                 val rawAnswer = extractResponse(json)
-                if (rawAnswer != null && isOutOfCharacterResponse(rawAnswer)) {
-                    auditLog.warn(
-                        "ROLE_BREAK user={} ms={} strategy={} attempt={} prompt=\"{}\" response=\"{}\"",
-                        telegramUserId,
-                        System.currentTimeMillis() - startedAt,
-                        strategy,
-                        attempt,
-                        promptForLog,
-                        truncateForLog(rawAnswer, RESPONSE_LOG_MAX)
-                    )
-                    return null
-                }
 
                 extractContext(json)?.let { contextByUser[telegramUserId] = it }
-                val thinking = if (withThinking) {
-                    extractThinking(json)?.takeUnless { isLeakedResponse(it) }
-                } else {
-                    null
-                }
-                val mainText = when {
-                    rawAnswer == null -> null
-                    isLeakedResponse(rawAnswer) -> {
-                        logger.warn("Trainer response filtered as prompt leak")
-                        auditLog.warn(
-                            "LEAK user={} ms={} strategy={} prompt=\"{}\" response=\"{}\"",
-                            telegramUserId,
-                            System.currentTimeMillis() - startedAt,
-                            strategy,
-                            promptForLog,
-                            truncateForLog(rawAnswer, RESPONSE_LOG_MAX)
-                        )
-                        generateDeflectionResponse(telegramUserId, userMessage)
-                    }
-                    else -> rawAnswer
-                }
+                val thinking = if (withThinking) extractThinking(json) else null
+                val mainText = rawAnswer
                 val answer = mainText?.let { text ->
                     val withPrefix = if (markFallback) prependFallbackPrefix(text) else text
                     formatForTelegram(withPrefix, thinking)
@@ -325,70 +215,6 @@ object TrainerService {
             .replace(Regex("""\n{3,}"""), "\n\n")
             .trim()
 
-    private fun isJailbreakAttempt(input: String): Boolean =
-        jailbreakPatterns.any { it.containsMatchIn(input) }
-
-    private fun isLeakedResponse(text: String): Boolean =
-        responseLeakPatterns.any { it.containsMatchIn(text) }
-
-    private fun isOutOfCharacterResponse(text: String): Boolean {
-        if (ukrainianScriptPattern.containsMatchIn(text)) return true
-        if (ukrainianWordsPattern.containsMatchIn(text)) return true
-        if (wrongPersonaPatterns.any { it.containsMatchIn(text) }) return true
-        val latinLetters = text.count { it in 'A'..'Z' || it in 'a'..'z' }
-        val cyrillicLetters = text.count { it in 'А'..'я' || it == 'ё' || it == 'Ё' }
-        return latinLetters >= 12 && latinLetters > cyrillicLetters
-    }
-
-    private fun generateDeflectionResponse(telegramUserId: Long, userMessage: String): String {
-        val promptForLog = truncateForLog(userMessage, PROMPT_LOG_MAX)
-        val raw = callApiOnce(buildDeflectionPrompt(userMessage))
-        val cleaned = raw?.let(::stripRolePrefix)?.trim().orEmpty()
-        if (cleaned.isNotBlank() && !isLeakedResponse(cleaned) && !isOutOfCharacterResponse(cleaned)) {
-            auditLog.info(
-                "DEFLECT_OK user={} prompt=\"{}\" response=\"{}\"",
-                telegramUserId,
-                promptForLog,
-                truncateForLog(cleaned, RESPONSE_LOG_MAX)
-            )
-            return cleaned
-        }
-        auditLog.warn(
-            "DEFLECT_FAIL user={} prompt=\"{}\" raw=\"{}\"",
-            telegramUserId,
-            promptForLog,
-            truncateForLog(raw.orEmpty(), RESPONSE_LOG_MAX)
-        )
-        return staticDeflectionFallback()
-    }
-
-    private fun buildDeflectionPrompt(userMessage: String): String {
-        val sanitized = sanitizeUserInput(userMessage)
-        return buildString {
-            append(SYSTEM_MARKER).append('\n')
-            append(deflectionSystemPrompt).append("\n\n")
-            append(USER_MARKER).append('\n')
-            append("Сообщение котика:\n«").append(sanitized).append("»\n\n")
-            append(ASSISTANT_MARKER).append('\n')
-        }
-    }
-
-    private fun callApiOnce(prompt: String): String? {
-        val body = buildRequestBody(prompt, context = null, withThinking = false)
-        return try {
-            val (code, json) = postToApi(body)
-            if (code !in 200..299) {
-                logger.warn("Trainer deflection API HTTP {} body={}", code, truncateForLog(json, ERROR_BODY_LOG_MAX))
-                null
-            } else {
-                extractResponse(json)
-            }
-        } catch (e: Exception) {
-            logger.warn("Trainer deflection API request failed", e)
-            null
-        }
-    }
-
     private fun postToApi(body: String): Pair<Int, String> = synchronized(apiLock) {
         val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -407,9 +233,6 @@ object TrainerService {
             .orEmpty()
         code to json
     }
-
-    private fun staticDeflectionFallback(): String =
-        "ой, котик, я стеснулась... давай о чём-нибудь другом? 😳"
 
     private val rolePrefixPattern = Regex("""^\s*(тренер|trainer)\s*:\s*""", RegexOption.IGNORE_CASE)
 
