@@ -7,27 +7,69 @@ import com.github.kotlintelegrambot.entities.Message
 import com.github.kotlintelegrambot.entities.ParseMode
 import com.github.kotlintelegrambot.entities.TelegramFile
 import com.github.kotlintelegrambot.entities.Update
+import com.github.kotlintelegrambot.types.TelegramBotResult
 import vc.fatfukkers.service.ActivityService
 import vc.fatfukkers.service.ForecastResult
 import vc.fatfukkers.service.ForecastService
+import vc.fatfukkers.service.ImageCaptionPhrases
 import vc.fatfukkers.service.ImageSearchService
+import vc.fatfukkers.service.TelegramAnimationSender
+import vc.fatfukkers.service.TrainerMessageRegistry
+import vc.fatfukkers.service.TrainerQueue
 import vc.fatfukkers.service.TrainerService
 import vc.fatfukkers.service.UserService
 import vc.fatfukkers.service.WeightChartService
 import vc.fatfukkers.service.WeightService
+import org.slf4j.LoggerFactory
+import retrofit2.Response
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-private val trainerWorker = Executors.newCachedThreadPool { runnable ->
-    Thread(runnable, "trainer-worker").apply { isDaemon = true }
+private val taskHandlerLogger = LoggerFactory.getLogger("TaskHandler")
+
+private val showImageWorker = Executors.newCachedThreadPool { runnable ->
+    Thread(runnable, "show-image-worker").apply { isDaemon = true }
 }
 
 private val showImageQueryPattern = Regex("""^\s*покажи(\s+|$)""", RegexOption.IGNORE_CASE)
-private val trainerThinkQueryPattern = Regex("""^подумай\b\s*""", RegexOption.IGNORE_CASE)
+
+fun Bot.handleTrainerDelete(message: Message) {
+    val chatId = ChatId.fromId(message.chat.id)
+    val chatIdLong = message.chat.id
+    val reply = message.replyToMessage ?: return
+    if (!TrainerMessageRegistry.isTrainerMessage(chatIdLong, reply.messageId)) {
+        sendMessage(
+            chatId = chatId,
+            text = "хотела бы но не могу :(",
+            replyToMessageId = message.messageId,
+        )
+        return
+    }
+
+    val deleted = deleteMessage(chatId, reply.messageId).fold(
+        ifSuccess = { it },
+        ifError = {
+            taskHandlerLogger.warn("deleteMessage failed for trainer message {}: {}", reply.messageId, it)
+            false
+        },
+    )
+    if (deleted) {
+        TrainerMessageRegistry.unregister(chatIdLong, reply.messageId)
+        deleteMessage(chatId, message.messageId)
+    } else {
+        sendMessage(
+            chatId = chatId,
+            text = "не получилось удалить (может, прошло больше 48 часов?)",
+            replyToMessageId = message.messageId,
+        )
+    }
+}
+
 fun Bot.handleTask(
     task: Task,
     rawText: String,
@@ -35,7 +77,8 @@ fun Bot.handleTask(
     message: Message,
     weightService: WeightService,
     activityService: ActivityService,
-    zoneId: ZoneId
+    zoneId: ZoneId,
+    trainerReplyTo: Message? = null,
 ) {
     val u = UserService.upsertFromUpdate(update)
     val chatId = ChatId.fromId(message.chat.id)
@@ -145,13 +188,9 @@ fun Bot.handleTask(
             }
         }
         is Task.Trainer -> {
-            val query = rawText
-                .replace(Regex("тренер", RegexOption.IGNORE_CASE), "")
-                .trim()
-                .replace(Regex("^[,.!?:;—-]+\\s*"), "")
-                .trim()
+            val query = buildTrainerQuery(rawText, trainerReplyTo)
             if (query.isEmpty()) {
-                sendMessage(
+                sendTrainerMessage(
                     chatId = chatId,
                     text = "напиши вопрос тренеру, например: «тренер как начать бегать?»",
                     replyToMessageId = message.messageId
@@ -161,7 +200,7 @@ fun Bot.handleTask(
             val forgetQuery = query.lowercase(java.util.Locale("ru", "RU"))
             if (forgetQuery == "забудь" || forgetQuery == "забудь всё" || forgetQuery == "забудь все") {
                 TrainerService.resetContext(u.telegramId)
-                sendMessage(
+                sendTrainerMessage(
                     chatId = chatId,
                     text = "тренер забыла прошлый разговор — начинаем с чистого листа",
                     replyToMessageId = message.messageId
@@ -171,52 +210,32 @@ fun Bot.handleTask(
             if (showImageQueryPattern.containsMatchIn(forgetQuery)) {
                 val imageQuery = query.replace(Regex("^\\s*покажи\\s*", RegexOption.IGNORE_CASE), "").trim()
                 if (imageQuery.isEmpty()) {
-                    sendMessage(
+                    sendTrainerMessage(
                         chatId = chatId,
-                        text = "напиши что показать, например: «тренер покажи котика»",
+                        text = "что тебе показать? напиши «покажи котика» например",
                         replyToMessageId = message.messageId
                     )
                     return
                 }
                 val replyToMessageId = message.messageId
-                trainerWorker.execute {
-                    val bytes = searchImageWithUploadPhoto(chatId, imageQuery)
-                    if (bytes == null) {
-                        sendMessage(
-                            chatId = chatId,
-                            text = "ничего не нашла по запросу «$imageQuery»",
-                            replyToMessageId = replyToMessageId
-                        )
-                    } else {
-                        val ext = ImageSearchService.extensionFor(bytes)
-                        sendPhoto(
-                            chatId = chatId,
-                            photo = TelegramFile.ByByteArray(bytes, "image.$ext"),
-                            replyToMessageId = replyToMessageId
-                        )
-                    }
+                showImageWorker.execute {
+                    sendShowImage(chatId, imageQuery, replyToMessageId)
                 }
-                return
-            }
-            val (trainerQuery, withThinking) = parseTrainerThinkQuery(query)
-            if (trainerQuery.isEmpty()) {
-                sendMessage(
-                    chatId = chatId,
-                    text = "напиши вопрос тренеру, например: «тренер как начать бегать?» или «тренер подумай как начать бегать?»",
-                    replyToMessageId = message.messageId
-                )
                 return
             }
             val replyToMessageId = message.messageId
             val telegramUserId = u.telegramId
-            trainerWorker.execute {
-                val answer = askTrainerWithTyping(chatId, telegramUserId, trainerQuery, withThinking)
-                sendMessage(
-                    chatId = chatId,
-                    text = answer ?: "Я сейчас недоступна 💔 (скорее всего виноват Макс)",
-                    parseMode = ParseMode.HTML,
-                    replyToMessageId = replyToMessageId
-                )
+            TrainerQueue.submit(telegramUserId) {
+                val answer = askTrainerWithTyping(chatId, telegramUserId, query)
+                val text = answer?.takeIf { it.isNotBlank() }
+                    ?: "Я сейчас недоступна 💔 (скорее всего виноват Макс)"
+                if (!sendTrainerAnswer(chatId, text, replyToMessageId, query)) {
+                    sendTrainerMessage(
+                        chatId = chatId,
+                        text = "не смогла отправить ответ тренера",
+                        allowSendingWithoutReply = true,
+                    )
+                }
             }
         }
     }
@@ -230,7 +249,109 @@ sealed class Task {
     data object Trainer : Task()
 }
 
-private fun Bot.searchImageWithUploadPhoto(chatId: ChatId, imageQuery: String): ByteArray? {
+private fun Bot.sendShowImage(chatId: ChatId, imageQuery: String, replyToMessageId: Long) {
+    val chatIdLong = (chatId as? ChatId.Id)?.id ?: return
+    val caption = ImageCaptionPhrases.random(imageQuery)
+    val gifBytes = searchImageWithUpload(chatId, "gif $imageQuery") {
+        ImageSearchService.searchGifBytes(it)
+    }
+    if (gifBytes != null) {
+        val messageId = sendShowAnimation(chatId, gifBytes, replyToMessageId, caption)
+        if (messageId != null) {
+            TrainerMessageRegistry.register(chatIdLong, messageId)
+            return
+        }
+    }
+
+    val photoBytes = searchImageWithUpload(chatId, imageQuery) {
+        ImageSearchService.searchImageBytes(it)
+    }
+    if (photoBytes == null) {
+        sendTrainerMessage(
+            chatId = chatId,
+            text = "ничего не нашла по запросу «$imageQuery»",
+            replyToMessageId = replyToMessageId
+        )
+        return
+    }
+
+    val ext = ImageSearchService.extensionFor(photoBytes)
+    val photoResult = sendPhoto(
+        chatId = chatId,
+        photo = TelegramFile.ByByteArray(photoBytes, "image.$ext"),
+        caption = caption,
+        replyToMessageId = replyToMessageId,
+    )
+    if (photoResult.telegramSucceeded("sendPhoto", imageQuery)) {
+        photoResult.first?.body()?.result?.messageId?.let { TrainerMessageRegistry.register(chatIdLong, it) }
+    } else {
+        sendTrainerMessage(
+            chatId = chatId,
+            text = "не смогла отправить картинку по запросу «$imageQuery»",
+            replyToMessageId = replyToMessageId
+        )
+    }
+}
+
+private fun Bot.sendShowAnimation(
+    chatId: ChatId,
+    gifBytes: ByteArray,
+    replyToMessageId: Long,
+    caption: String,
+): Long? {
+    val token = System.getenv("FATCTRL_BOT_TOKEN")?.trim().orEmpty()
+    if (token.isBlank()) {
+        taskHandlerLogger.warn("sendAnimation skipped: FATCTRL_BOT_TOKEN is missing")
+        return null
+    }
+    val chatIdLong = (chatId as? ChatId.Id)?.id ?: return null
+    sendChatAction(chatId, ChatAction.UPLOAD_VIDEO)
+    return TelegramAnimationSender.send(token, chatIdLong, gifBytes, replyToMessageId, caption)
+}
+
+private fun TelegramBotResult<Message>.telegramMessageSucceeded(action: String, query: String? = null): Boolean =
+    fold(
+        ifSuccess = { true },
+        ifError = { error ->
+            taskHandlerLogger.warn(
+                "{} failed{}: {}",
+                action,
+                query?.let { " for «$it»" } ?: "",
+                error,
+            )
+            false
+        },
+    )
+
+private fun <T> Pair<Response<T?>?, Exception?>.telegramSucceeded(action: String, query: String? = null): Boolean {
+    val (response, exception) = this
+    if (exception != null) {
+        taskHandlerLogger.warn("{} failed{}: {}", action, query?.let { " for «$it»" } ?: "", exception.message)
+        return false
+    }
+    if (response?.isSuccessful == true && response.body() != null) {
+        return true
+    }
+    val errorBody = try {
+        response?.errorBody()?.string()
+    } catch (_: Exception) {
+        null
+    }
+    taskHandlerLogger.warn(
+        "{} HTTP {}{}: {}",
+        action,
+        response?.code(),
+        query?.let { " for «$it»" } ?: "",
+        errorBody ?: "empty response",
+    )
+    return false
+}
+
+private fun Bot.searchImageWithUpload(
+    chatId: ChatId,
+    imageQuery: String,
+    search: (String) -> ByteArray?,
+): ByteArray? {
     val stopUpload = AtomicBoolean(false)
     val uploadThread = Thread {
         while (!stopUpload.get()) {
@@ -247,8 +368,9 @@ private fun Bot.searchImageWithUploadPhoto(chatId: ChatId, imageQuery: String): 
     }
 
     return try {
-        ImageSearchService.searchImageBytes(imageQuery)
-    } catch (_: Exception) {
+        search(imageQuery)
+    } catch (e: Exception) {
+        taskHandlerLogger.warn("Image search failed for «{}»", imageQuery, e)
         null
     } finally {
         stopUpload.set(true)
@@ -256,23 +378,118 @@ private fun Bot.searchImageWithUploadPhoto(chatId: ChatId, imageQuery: String): 
     }
 }
 
-private fun parseTrainerThinkQuery(query: String): Pair<String, Boolean> {
-    val withThinking = trainerThinkQueryPattern.containsMatchIn(query)
-    val stripped = if (withThinking) trainerThinkQueryPattern.replace(query, "").trim() else query
-    return stripped to withThinking
+internal fun extractTrainerMessageContext(message: Message): String? {
+    message.caption?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    message.text?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+    if (message.photo != null || message.animation != null || message.video != null) {
+        return "фото или видео"
+    }
+    return null
+}
+
+internal fun buildTrainerQuery(rawText: String, replyToTrainerMessage: Message?): String {
+    val query = rawText
+        .replace(Regex("тренер", RegexOption.IGNORE_CASE), "")
+        .trim()
+        .replace(Regex("^[,.!?:;—-]+\\s*"), "")
+        .trim()
+    if (replyToTrainerMessage == null) return query
+    val context = extractTrainerMessageContext(replyToTrainerMessage) ?: return query
+    return buildString {
+        append("Пользователь отвечает на моё сообщение: «")
+        append(context)
+        append("».\nЕго вопрос: ")
+        append(query)
+    }
+}
+
+private const val TRAINER_TYPING_INTERVAL_MS = 10_000L
+private const val TRAINER_TYPING_PULSE_MS = 1_000L
+private const val TELEGRAM_MESSAGE_MAX = 4096
+
+private fun escapeHtmlForTelegram(text: String): String =
+    text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+
+private fun Bot.sendTrainerMessage(
+    chatId: ChatId,
+    text: String,
+    parseMode: ParseMode? = null,
+    replyToMessageId: Long? = null,
+    allowSendingWithoutReply: Boolean? = null,
+): Boolean {
+    val chatIdLong = (chatId as? ChatId.Id)?.id ?: return false
+    val result = sendMessage(
+        chatId = chatId,
+        text = text,
+        parseMode = parseMode,
+        replyToMessageId = replyToMessageId,
+        allowSendingWithoutReply = allowSendingWithoutReply,
+    )
+    result.fold(
+        ifSuccess = { TrainerMessageRegistry.register(chatIdLong, it.messageId) },
+        ifError = {},
+    )
+    return result.telegramMessageSucceeded("sendMessage")
+}
+
+private fun Bot.sendTrainerAnswer(
+    chatId: ChatId,
+    plainText: String,
+    replyToMessageId: Long,
+    query: String,
+): Boolean {
+    val chatIdLong = (chatId as? ChatId.Id)?.id ?: return false
+    val text = plainText.take(TELEGRAM_MESSAGE_MAX).trim()
+    if (text.isEmpty()) return false
+
+    val attempts = listOf(
+        {
+            sendMessage(
+                chatId = chatId,
+                text = escapeHtmlForTelegram(text),
+                parseMode = ParseMode.HTML,
+                replyToMessageId = replyToMessageId,
+                allowSendingWithoutReply = true,
+            )
+        },
+        {
+            sendMessage(
+                chatId = chatId,
+                text = text,
+                replyToMessageId = replyToMessageId,
+                allowSendingWithoutReply = true,
+            )
+        },
+        {
+            sendMessage(chatId = chatId, text = text)
+        },
+    )
+    for (attempt in attempts) {
+        val result = attempt()
+        if (result.telegramMessageSucceeded("sendMessage", query)) {
+            result.fold(
+                ifSuccess = { TrainerMessageRegistry.register(chatIdLong, it.messageId) },
+                ifError = {},
+            )
+            return true
+        }
+    }
+    return false
 }
 
 private fun Bot.askTrainerWithTyping(
     chatId: ChatId,
     telegramUserId: Long,
     query: String,
-    withThinking: Boolean,
 ): String? {
     val stopTyping = AtomicBoolean(false)
     val typingThread = Thread {
         while (!stopTyping.get()) {
             sendChatAction(chatId, ChatAction.TYPING)
-            if (sleepUntil(stopTyping, 4_000)) break
+            if (sleepUntil(stopTyping, TRAINER_TYPING_PULSE_MS)) break
+            if (sleepUntil(stopTyping, TRAINER_TYPING_INTERVAL_MS - TRAINER_TYPING_PULSE_MS)) break
         }
     }.apply {
         isDaemon = true
@@ -280,7 +497,7 @@ private fun Bot.askTrainerWithTyping(
     }
 
     return try {
-        TrainerService.ask(telegramUserId, query, withThinking)
+        TrainerService.ask(telegramUserId, query)
     } catch (_: Exception) {
         null
     } finally {

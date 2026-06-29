@@ -36,7 +36,19 @@ object ImageSearchService {
 
     private val recentUrlsByQuery = ConcurrentHashMap<String, ArrayDeque<String>>()
 
-    fun searchImageBytes(query: String): ByteArray? {
+    fun searchImageBytes(query: String): ByteArray? =
+        searchBytes(query) { _, bytes -> bytes }
+
+    fun searchGifBytes(query: String): ByteArray? =
+        searchBytes(query) { _, bytes -> bytes.takeIf(::isGif) }
+
+    fun isGif(bytes: ByteArray): Boolean =
+        bytes.size >= 6 &&
+            bytes[0] == 'G'.code.toByte() &&
+            bytes[1] == 'I'.code.toByte() &&
+            bytes[2] == 'F'.code.toByte()
+
+    private fun searchBytes(query: String, accept: (String, ByteArray) -> ByteArray?): ByteArray? {
         val encoded = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8)
         val queryKey = normalizeQuery(query)
 
@@ -52,8 +64,10 @@ object ImageSearchService {
         for (url in candidates) {
             if (attempts >= MAX_DOWNLOAD_ATTEMPTS) break
             downloadImage(url)?.let { bytes ->
-                rememberUrl(queryKey, url)
-                return bytes
+                accept(queryKey, bytes)?.let { accepted ->
+                    rememberUrl(queryKey, url)
+                    return accepted
+                }
             }
             attempts++
         }

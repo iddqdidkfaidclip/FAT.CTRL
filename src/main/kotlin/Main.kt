@@ -12,8 +12,10 @@ import vc.fatfukkers.BotTask
 import vc.fatfukkers.Task
 import vc.fatfukkers.detectVideoUrl
 import vc.fatfukkers.handleTask
+import vc.fatfukkers.handleTrainerDelete
 import vc.fatfukkers.handleVideoDownload
 import vc.fatfukkers.service.ActivityService
+import vc.fatfukkers.service.TrainerMessageRegistry
 import vc.fatfukkers.service.UserService
 import vc.fatfukkers.service.VideoDownloadService
 import vc.fatfukkers.service.WeightService
@@ -26,6 +28,9 @@ private val logger = LoggerFactory.getLogger("FatCtrlBot")
 
 private fun isCommandBoundary(c: Char): Boolean =
     c.isWhitespace() || c in ",.!?:;—-»«"
+
+private val trainerShowImagePattern = Regex("""^\s*покажи(\s+|$)""", RegexOption.IGNORE_CASE)
+private val deleteTrainerPattern = Regex("""^\s*удоли\s*[!.?]*\s*$""", RegexOption.IGNORE_CASE)
 
 private fun commandsHelpText(): String = """
 <b>📋 Команды:</b>
@@ -42,9 +47,9 @@ private fun commandsHelpText(): String = """
 
 🏋️‍♂️ <b>тренер …</b> — спросить ИИ-тренера
    <i>пример: тренер как начать бегать?</i>
-   <i>с размышлениями: тренер подумай ...</i>
-   <i>картинка: тренер покажи ...</i>
+   <i>картинка: покажи ... / тренер покажи ...</i>
    <i>забыть диалог: тренер забудь / тренер забудь всё</i>
+   <i>ответь реплаем на сообщение тренера — сработает так же, с учётом контекста</i>
 
 📥 <b>ссылка YouTube / Instagram</b> — скачать видео или фото
    <i>просто отправь ссылку первой в сообщении</i>
@@ -126,6 +131,41 @@ ${commandsHelpText()}
                         url = videoUrl,
                         update = update,
                         message = message,
+                    )
+                    return@text
+                }
+
+                if (deleteTrainerPattern.matches(rawOriginal)) {
+                    UserService.upsertFromUpdate(update)
+                    bot.handleTrainerDelete(message)
+                    return@text
+                }
+
+                message.replyToMessage?.let { reply ->
+                    if (TrainerMessageRegistry.isTrainerMessage(message.chat.id, reply.messageId)) {
+                        bot.handleTask(
+                            task = Task.Trainer,
+                            rawText = rawOriginal,
+                            update = update,
+                            message = message,
+                            weightService = weightService,
+                            activityService = activityService,
+                            zoneId = zoneId,
+                            trainerReplyTo = reply,
+                        )
+                        return@text
+                    }
+                }
+
+                if (trainerShowImagePattern.containsMatchIn(rawOriginal)) {
+                    bot.handleTask(
+                        task = Task.Trainer,
+                        rawText = rawOriginal,
+                        update = update,
+                        message = message,
+                        weightService = weightService,
+                        activityService = activityService,
+                        zoneId = zoneId,
                     )
                     return@text
                 }
