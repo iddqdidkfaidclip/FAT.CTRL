@@ -51,7 +51,7 @@ fun Bot.handleTrainerDelete(message: Message) {
         sendMessage(
             chatId = chatId,
             text = "хотела бы но не могу :(",
-            replyToMessageId = message.messageId,
+            replyParameters = replyTo(message.messageId),
         )
         return
     }
@@ -70,7 +70,7 @@ fun Bot.handleTrainerDelete(message: Message) {
         sendMessage(
             chatId = chatId,
             text = "не получилось удалить (может, прошло больше 48 часов?)",
-            replyToMessageId = message.messageId,
+            replyParameters = replyTo(message.messageId),
         )
     }
 }
@@ -193,7 +193,7 @@ fun Bot.handleTask(
             }
         }
         is Task.Trainer -> {
-            val query = buildTrainerQuery(rawText, trainerReplyTo)
+            val query = buildTrainerQuery(rawText, trainerReplyTo, message.quote?.text)
             if (query.isEmpty()) {
                 sendTrainerMessage(
                     chatId = chatId,
@@ -292,7 +292,7 @@ private fun Bot.sendShowImage(chatId: ChatId, imageQuery: String, replyToMessage
         chatId = chatId,
         photo = TelegramFile.ByByteArray(photoBytes, "image.$ext"),
         caption = caption,
-        replyToMessageId = replyToMessageId,
+        replyParameters = replyTo(replyToMessageId),
     )
     if (photoResult.telegramSucceeded("sendPhoto", imageQuery)) {
         photoResult.first?.body()?.result?.messageId?.let { TrainerMessageRegistry.register(chatIdLong, it) }
@@ -399,14 +399,20 @@ internal fun extractTrainerMessageContext(message: Message): String? {
     return null
 }
 
-internal fun buildTrainerQuery(rawText: String, replyToTrainerMessage: Message?): String {
+internal fun buildTrainerQuery(
+    rawText: String,
+    replyToTrainerMessage: Message?,
+    quotedText: String? = null,
+): String {
     val query = rawText
         .replace(Regex("тренер", RegexOption.IGNORE_CASE), "")
         .trim()
         .replace(Regex("^[,.!?:;—-]+\\s*"), "")
         .trim()
     if (replyToTrainerMessage == null) return query
-    val context = extractTrainerMessageContext(replyToTrainerMessage) ?: return query
+    val context = quotedText?.trim()?.takeIf { it.isNotEmpty() }
+        ?: extractTrainerMessageContext(replyToTrainerMessage)
+        ?: return query
     return buildString {
         append("Пользователь отвечает на моё сообщение: «")
         append(context)
@@ -428,15 +434,14 @@ private fun Bot.sendTrainerMessage(
     text: String,
     parseMode: ParseMode? = null,
     replyToMessageId: Long? = null,
-    allowSendingWithoutReply: Boolean? = null,
+    allowSendingWithoutReply: Boolean = false,
 ): Boolean {
     val chatIdLong = (chatId as? ChatId.Id)?.id ?: return false
     val result = sendMessage(
         chatId = chatId,
         text = text,
         parseMode = parseMode,
-        replyToMessageId = replyToMessageId,
-        allowSendingWithoutReply = allowSendingWithoutReply,
+        replyParameters = replyTo(replyToMessageId, allowSendingWithoutReply),
     )
     result.fold(
         ifSuccess = { TrainerMessageRegistry.register(chatIdLong, it.messageId) },
@@ -462,16 +467,14 @@ private fun Bot.sendTrainerAnswer(
                 chatId = chatId,
                 text = if (preformattedHtml) text else escapeHtmlForTelegram(text),
                 parseMode = ParseMode.HTML,
-                replyToMessageId = replyToMessageId,
-                allowSendingWithoutReply = true,
+                replyParameters = replyTo(replyToMessageId, allowWithoutReply = true),
             )
         },
         {
             sendMessage(
                 chatId = chatId,
                 text = text,
-                replyToMessageId = replyToMessageId,
-                allowSendingWithoutReply = true,
+                replyParameters = replyTo(replyToMessageId, allowWithoutReply = true),
             )
         },
         {

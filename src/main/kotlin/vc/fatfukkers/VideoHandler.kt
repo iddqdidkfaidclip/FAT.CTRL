@@ -72,7 +72,7 @@ fun Bot.handleVideoDownload(url: String, update: Update, message: Message) {
                             sendMessage(
                                 chatId = chatId,
                                 text = VideoDownloadService.userError("не вышло отправить в Telegram"),
-                                replyToMessageId = replyToMessageId,
+                                replyParameters = replyTo(replyToMessageId),
                             )
                         }
                     } finally {
@@ -83,7 +83,7 @@ fun Bot.handleVideoDownload(url: String, update: Update, message: Message) {
                     sendMessage(
                         chatId = chatId,
                         text = outcome.message,
-                        replyToMessageId = replyToMessageId,
+                        replyParameters = replyTo(replyToMessageId),
                     )
                 }
             }
@@ -92,7 +92,7 @@ fun Bot.handleVideoDownload(url: String, update: Update, message: Message) {
             sendMessage(
                 chatId = chatId,
                 text = VideoDownloadService.userError("ошибка при скачивании — ${e.message ?: "неизвестная"}"),
-                replyToMessageId = replyToMessageId,
+                replyParameters = replyTo(replyToMessageId),
             )
         }
     }
@@ -139,7 +139,7 @@ private fun Bot.sendDownloadedMedia(
         val groupResult = sendMediaGroup(
             chatId = chatId,
             mediaGroup = MediaGroup.from(*media),
-            replyToMessageId = if (batchIndex == 0) replyToMessageId else null,
+            replyParameters = replyTo(if (batchIndex == 0) replyToMessageId else null),
         )
 
         if (groupResult.isSuccess) {
@@ -179,19 +179,19 @@ private fun Bot.sendSingleItem(
             chatId = chatId,
             audio = TelegramFile.ByFile(file),
             title = caption,
-            replyToMessageId = replyToMessageId,
+            replyParameters = replyTo(replyToMessageId),
         )
         VideoDownloadService.MediaKind.PHOTO -> sendPhoto(
             chatId = chatId,
             photo = TelegramFile.ByFile(file),
             caption = caption,
-            replyToMessageId = replyToMessageId,
+            replyParameters = replyTo(replyToMessageId),
         )
         VideoDownloadService.MediaKind.VIDEO -> sendVideo(
             chatId = chatId,
             video = TelegramFile.ByFile(file),
             caption = caption,
-            replyToMessageId = replyToMessageId,
+            replyParameters = replyTo(replyToMessageId),
         )
     }
     if (error != null) {

@@ -13,7 +13,7 @@ repositories {
 }
 
 dependencies {
-    implementation("io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram:6.3.0")
+    implementation("io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram:10.0.0")
 
     // DB
     implementation("org.jetbrains.exposed:exposed-core:0.61.0")
