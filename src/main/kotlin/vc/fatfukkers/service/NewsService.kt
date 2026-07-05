@@ -119,19 +119,42 @@ object NewsService {
 
     internal fun primaryFeedUrl(): String = buildFeedSources().first()
 
-    fun buildCommentsPrompt(items: List<NewsItem>): String = buildString {
-        appendLine("Ниже ${items.size} актуальных топовых заголовков новостей прямо сейчас.")
-        appendLine("Для каждого напиши ОДИН короткий комментарий от себя — одна строка, мило и игриво, со смайликом в конце.")
-        appendLine("НЕ переписывай и НЕ цитируй заголовки — только комментарии.")
-        appendLine("Ответ строго в формате (ровно ${items.size} строк):")
-        items.indices.forEach { i ->
-            appendLine("${i + 1}. комментарий")
+    private val commentFallbacks = listOf(
+        "ого, следим за развитием 🩷",
+        "интересно, что будет дальше 😳",
+        "ну и новости, котик 🙈",
+        "смотрим внимательно 👀",
+        "вау, не ожидала такого 🫣",
+    )
+
+    private val numberedCommentPattern = Regex("""(?m)^\s*(\d+)[\.\):\-]\s*(.+)$""")
+
+    fun buildComments(items: List<NewsItem>, ask: (String) -> String?): List<String>? {
+        if (items.isEmpty()) return null
+        val result = mutableListOf<String>()
+        for (chunk in items.chunked(5)) {
+            val raw = ask(buildCommentsPrompt(chunk)) ?: return null
+            val parsed = parseComments(raw, chunk.size) ?: return null
+            result.addAll(parsed)
         }
+        return result.takeIf { it.size == items.size }
+    }
+
+    fun buildCommentsPrompt(items: List<NewsItem>): String = buildString {
+        appendLine("Задача: для каждого заголовка — одна строка комментария от тренера (мило, на «ты», 5–12 слов, эмодзи в конце).")
+        appendLine("НЕ пиши заголовки. НЕ пиши пояснений. Только нумерованный список из ${items.size} строк.")
+        appendLine("Каждая строка — живое предложение, не символ «?» и не одно слово.")
+        appendLine()
+        appendLine("Пример для 2 заголовков:")
+        appendLine("1. Ого, серьёзные переговоры, надеюсь на мир 🩷")
+        appendLine("2. Страшновато звучит, но держимся, котик 😳")
         appendLine()
         appendLine("Заголовки:")
         items.forEachIndexed { i, item ->
             appendLine("${i + 1}. ${item.title}")
         }
+        appendLine()
+        appendLine("Твой ответ (${items.size} строк, формат «N. комментарий»):")
     }
 
     fun assembleDigest(items: List<NewsItem>, comments: List<String>): String {
@@ -139,10 +162,10 @@ object NewsService {
         val body = buildString {
             items.forEachIndexed { i, item ->
                 if (i > 0) appendLine()
-                append("⚡ ").append(item.title)
-                comments.getOrNull(i)?.trim()?.takeIf { it.isNotEmpty() }?.let { comment ->
+                append("⚡ <i>").append(escapeHtml(item.title)).append("</i>")
+                comments.getOrNull(i)?.trim()?.takeIf { isUsefulComment(it) }?.let { comment ->
                     appendLine()
-                    append("  ↳😺 ").append(comment.stripLeadingNumber())
+                    append("  ↳ <b>").append(escapeHtml(comment.stripLeadingNumber())).append("</b>")
                 }
             }
         }
@@ -151,18 +174,59 @@ object NewsService {
 
     fun formatHeadlinesFallback(items: List<NewsItem>): String {
         val intro = "котик, вот топ новостей прямо сейчас 📰"
-        val body = items.joinToString("\n\n") { "⚡ ${it.title}" }
+        val body = items.joinToString("\n\n") { "⚡ <i>${escapeHtml(it.title)}</i>" }
         return truncateMessage("$intro\n\n$body")
     }
 
+    internal fun escapeHtml(text: String): String =
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+
     internal fun parseComments(raw: String, expectedCount: Int): List<String>? {
-        val lines = raw.lines()
+        val byIndex = linkedMapOf<Int, String>()
+        for (match in numberedCommentPattern.findAll(raw)) {
+            val index = match.groupValues[1].toIntOrNull() ?: continue
+            if (index !in 1..expectedCount) continue
+            val text = match.groupValues[2].trim()
+            if (text.isNotEmpty()) {
+                byIndex.putIfAbsent(index, text)
+            }
+        }
+
+        if (byIndex.size >= expectedCount) {
+            return (1..expectedCount).map { idx ->
+                normalizeComment(byIndex.getValue(idx), idx - 1)
+            }
+        }
+
+        val loose = raw.lines()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .map { it.stripLeadingNumber() }
             .filter { it.isNotEmpty() }
-        if (lines.size < expectedCount) return null
-        return lines.take(expectedCount)
+        if (loose.size >= expectedCount) {
+            return loose.take(expectedCount).mapIndexed { i, comment ->
+                normalizeComment(comment, i)
+            }
+        }
+
+        return null
+    }
+
+    internal fun isUsefulComment(text: String): Boolean {
+        val trimmed = text.trim().stripLeadingNumber().trim()
+        if (trimmed.length < 10) return false
+        val letters = trimmed.count { it.isLetter() }
+        if (letters < 5) return false
+        if (trimmed.all { !it.isLetter() }) return false
+        if (trimmed.matches(Regex("""^[\p{P}\p{S}\s\d]+$"""))) return false
+        return true
+    }
+
+    private fun normalizeComment(raw: String, index: Int): String {
+        val trimmed = raw.trim().stripLeadingNumber().trim()
+        return if (isUsefulComment(trimmed)) trimmed else commentFallbacks[index % commentFallbacks.size]
     }
 
     internal fun parseRssItems(xml: String, zoneId: ZoneId = ZoneId.of("Europe/Moscow")): List<NewsItem> {

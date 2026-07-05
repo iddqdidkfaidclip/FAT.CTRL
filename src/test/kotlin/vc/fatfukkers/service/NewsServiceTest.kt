@@ -85,6 +85,25 @@ class NewsServiceTest {
     }
 
     @Test
+    fun `parseComments replaces garbage with fallback`() {
+        val raw = """
+            1. ?
+            2. нормальный комментарий про новость 🩷
+        """.trimIndent()
+        val comments = NewsService.parseComments(raw, 2)
+        assertNotNull(comments)
+        assertTrue(NewsService.isUsefulComment(comments!![0]))
+        assertEquals("нормальный комментарий про новость 🩷", comments[1])
+    }
+
+    @Test
+    fun `isUsefulComment rejects punctuation only`() {
+        assertTrue(!NewsService.isUsefulComment("?;"))
+        assertTrue(!NewsService.isUsefulComment("😳"))
+        assertTrue(NewsService.isUsefulComment("ого, интересная новость 🩷"))
+    }
+
+    @Test
     fun `parseComments returns null when too few lines`() {
         assertNull(NewsService.parseComments("1. только одна", 3))
     }
@@ -97,18 +116,23 @@ class NewsServiceTest {
         )
         val text = NewsService.assembleDigest(items, listOf("коммент а 🩷", "коммент б 😳"))
         assertTrue(text.contains("топ новостей прямо сейчас"))
-        assertTrue(text.contains("⚡ Заголовок А"))
-        assertTrue(text.contains("⚡ Заголовок Б"))
-        assertTrue(text.contains("↳😺 коммент а 🩷"))
-        assertTrue(text.contains("↳😺 коммент б 😳"))
+        assertTrue(text.contains("⚡ <i>Заголовок А</i>"))
+        assertTrue(text.contains("⚡ <i>Заголовок Б</i>"))
+        assertTrue(text.contains("↳ <b>коммент а 🩷</b>"))
+        assertTrue(text.contains("↳ <b>коммент б 😳</b>"))
     }
 
     @Test
-    fun `formatHeadlinesFallback lists titles only`() {
+    fun `escapeHtml escapes telegram special chars`() {
+        assertEquals("a &amp; b &lt;script&gt;", NewsService.escapeHtml("a & b <script>"))
+    }
+
+    @Test
+    fun `formatHeadlinesFallback lists titles in italic`() {
         val items = listOf(NewsItem("Только заголовок", "https://x"))
         val text = NewsService.formatHeadlinesFallback(items)
         assertTrue(text.contains("топ новостей прямо сейчас"))
-        assertTrue(text.contains("• Только заголовок"))
+        assertTrue(text.contains("⚡ <i>Только заголовок</i>"))
     }
 }
 

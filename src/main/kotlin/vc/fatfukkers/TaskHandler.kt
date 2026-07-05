@@ -450,6 +450,7 @@ private fun Bot.sendTrainerAnswer(
     plainText: String,
     replyToMessageId: Long,
     query: String,
+    preformattedHtml: Boolean = false,
 ): Boolean {
     val chatIdLong = (chatId as? ChatId.Id)?.id ?: return false
     val text = plainText.take(TELEGRAM_MESSAGE_MAX).trim()
@@ -459,7 +460,7 @@ private fun Bot.sendTrainerAnswer(
         {
             sendMessage(
                 chatId = chatId,
-                text = escapeHtmlForTelegram(text),
+                text = if (preformattedHtml) text else escapeHtmlForTelegram(text),
                 parseMode = ParseMode.HTML,
                 replyToMessageId = replyToMessageId,
                 allowSendingWithoutReply = true,
@@ -510,9 +511,7 @@ private fun Bot.sendTrainerNews(chatId: ChatId, zoneId: ZoneId, replyToMessageId
         if (items.isEmpty()) {
             "котик, сейчас не смогла найти свежие новости — попробуй позже 📰"
         } else {
-            val prompt = NewsService.buildCommentsPrompt(items)
-            val rawComments = TrainerService.askOneShot(prompt)
-            val comments = rawComments?.let { NewsService.parseComments(it, items.size) }
+            val comments = NewsService.buildComments(items) { TrainerService.askOneShot(it) }
             if (comments != null) {
                 NewsService.assembleDigest(items, comments)
             } else {
@@ -528,7 +527,7 @@ private fun Bot.sendTrainerNews(chatId: ChatId, zoneId: ZoneId, replyToMessageId
     typingThread.interrupt()
     typingThread.join()
 
-    if (!sendTrainerAnswer(chatId, text, replyToMessageId, "новости")) {
+    if (!sendTrainerAnswer(chatId, text, replyToMessageId, "новости", preformattedHtml = true)) {
         sendTrainerMessage(
             chatId = chatId,
             text = "не смогла отправить новости",
