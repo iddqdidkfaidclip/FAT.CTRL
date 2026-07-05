@@ -88,6 +88,7 @@ object TrainerService {
             promptForLog = promptForLog,
             startedAt = startedAt,
             strategy = "full",
+            saveContext = true,
         )?.let { return it }
 
         auditLog.warn("RETRY no-context user={} prompt=\"{}\"", telegramUserId, promptForLog)
@@ -100,6 +101,26 @@ object TrainerService {
             promptForLog = promptForLog,
             startedAt = startedAt,
             strategy = "no-context",
+            saveContext = true,
+        )
+    }
+
+    /** Одноразовый запрос без чтения/записи контекста диалога (новости и т.п.). */
+    fun askOneShot(prompt: String): String? {
+        val trimmed = prompt.trim()
+        if (trimmed.isEmpty()) return null
+
+        val promptForLog = truncateForLog(trimmed, PROMPT_LOG_MAX)
+        val startedAt = System.currentTimeMillis()
+        return performAsk(
+            telegramUserId = 0L,
+            userMessage = trimmed,
+            context = null,
+            promptMode = PromptMode.FULL,
+            promptForLog = promptForLog,
+            startedAt = startedAt,
+            strategy = "one-shot",
+            saveContext = false,
         )
     }
 
@@ -111,6 +132,7 @@ object TrainerService {
         promptForLog: String,
         startedAt: Long,
         strategy: String,
+        saveContext: Boolean,
     ): String? {
         val effectivePrompt = buildEffectivePrompt(userMessage, promptMode)
         val body = buildRequestBody(effectivePrompt, context)
@@ -152,7 +174,9 @@ object TrainerService {
                 return null
             }
 
-            extractContext(json)?.let { contextByUser[telegramUserId] = it }
+            if (saveContext) {
+                extractContext(json)?.let { contextByUser[telegramUserId] = it }
+            }
             auditLog.info(
                 "OK user={} ms={} strategy={} done={} prompt=\"{}\" response=\"{}\"",
                 telegramUserId,
@@ -162,7 +186,7 @@ object TrainerService {
                 promptForLog,
                 truncateForLog(answer, RESPONSE_LOG_MAX),
             )
-            return if (usingDefaultModel) "Oops, $answer" else answer
+            return if (saveContext && usingDefaultModel) "Oops, $answer" else answer
         } catch (e: java.net.SocketTimeoutException) {
             logger.warn("Trainer API timeout strategy={}", strategy, e)
         } catch (e: Exception) {

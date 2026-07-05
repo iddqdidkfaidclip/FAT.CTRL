@@ -13,6 +13,7 @@ import vc.fatfukkers.service.ForecastResult
 import vc.fatfukkers.service.ForecastService
 import vc.fatfukkers.service.ImageCaptionPhrases
 import vc.fatfukkers.service.ImageSearchService
+import vc.fatfukkers.service.NewsService
 import vc.fatfukkers.service.TelegramAnimationSender
 import vc.fatfukkers.service.TrainerMessageRegistry
 import vc.fatfukkers.service.TrainerQueue
@@ -37,6 +38,10 @@ private val showImageWorker = Executors.newCachedThreadPool { runnable ->
 }
 
 private val showImageQueryPattern = Regex("""^\s*покажи(\s+|$)""", RegexOption.IGNORE_CASE)
+internal val newsQueryPattern = Regex(
+    """^\s*(расскажи\s+)?новости(\s+за\s+вчера)?\s*$""",
+    RegexOption.IGNORE_CASE,
+)
 
 fun Bot.handleTrainerDelete(message: Message) {
     val chatId = ChatId.fromId(message.chat.id)
@@ -220,6 +225,13 @@ fun Bot.handleTask(
                 val replyToMessageId = message.messageId
                 showImageWorker.execute {
                     sendShowImage(chatId, imageQuery, replyToMessageId)
+                }
+                return
+            }
+            if (newsQueryPattern.matches(forgetQuery)) {
+                val replyToMessageId = message.messageId
+                TrainerQueue.submit(u.telegramId) {
+                    sendTrainerNews(chatId, zoneId, replyToMessageId)
                 }
                 return
             }
@@ -476,6 +488,53 @@ private fun Bot.sendTrainerAnswer(
         }
     }
     return false
+}
+
+private fun Bot.sendTrainerNews(chatId: ChatId, zoneId: ZoneId, replyToMessageId: Long) {
+    val stopTyping = AtomicBoolean(false)
+    val typingThread = Thread(
+        {
+            while (!stopTyping.get()) {
+                sendChatAction(chatId, ChatAction.TYPING)
+                if (sleepUntil(stopTyping, TRAINER_TYPING_REFRESH_MS)) break
+            }
+        },
+        "trainer-news-typing",
+    ).apply {
+        isDaemon = true
+        start()
+    }
+
+    val text = try {
+        val items = NewsService.fetchTopHeadlines(zoneId)
+        if (items.isEmpty()) {
+            "котик, сейчас не смогла найти свежие новости — попробуй позже 📰"
+        } else {
+            val prompt = NewsService.buildCommentsPrompt(items)
+            val rawComments = TrainerService.askOneShot(prompt)
+            val comments = rawComments?.let { NewsService.parseComments(it, items.size) }
+            if (comments != null) {
+                NewsService.assembleDigest(items, comments)
+            } else {
+                NewsService.formatHeadlinesFallback(items)
+            }
+        }
+    } catch (e: Exception) {
+        taskHandlerLogger.warn("Trainer news failed", e)
+        "не смогла собрать новости — попробуй позже 💔"
+    }
+
+    stopTyping.set(true)
+    typingThread.interrupt()
+    typingThread.join()
+
+    if (!sendTrainerAnswer(chatId, text, replyToMessageId, "новости")) {
+        sendTrainerMessage(
+            chatId = chatId,
+            text = "не смогла отправить новости",
+            allowSendingWithoutReply = true,
+        )
+    }
 }
 
 private fun Bot.askTrainerWithTyping(
