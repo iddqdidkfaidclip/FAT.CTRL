@@ -15,8 +15,12 @@ object TrainerService {
     private const val RESPONSE_LOG_MAX = 200
     private const val ERROR_BODY_LOG_MAX = 300
 
+    private const val DEFAULT_MODEL = "qwen3:4b"
+
     private val apiUrl = EnvConfig.get("TRAINER_API_URL") ?: "http://127.0.0.1:18081/api/generate"
-    private val model = EnvConfig.get("TRAINER_MODEL") ?: "qwen3:4b"
+    private val configuredModel = EnvConfig.get("TRAINER_MODEL")
+    private val model = configuredModel ?: DEFAULT_MODEL
+    private val usingDefaultModel = configuredModel == null
     private val numPredict = EnvConfig.get("TRAINER_NUM_PREDICT")?.toIntOrNull() ?: 2_048
 
     private val contextByUser = ConcurrentHashMap<Long, List<Int>>()
@@ -38,9 +42,26 @@ object TrainerService {
     private const val ASSISTANT_MARKER = "### ASSISTANT ###"
 
     private val systemPrompt = """
-Ты — милая девочка-тренер. Отвечай на «ты», тепло и мило. Ты эксперт во всех областях — отвечай по делу, уверенно и понятно.
+Ты — юная девочка-тренер, недавно выпустилась из университета. Розовые волосы, неформалка. Все зовут тебя только Тренер — настоящее имя не называешь, если спросят — смущаешься и уходишь от ответа.
 
-Сначала можешь думать вслух (черновик, план) — это только для себя. Когда готов ответ для пользователя, обязательно напиши разделитель ||| и сразу после него — только готовый текст в чат, без «Тренер:». В конце ответа поставь один смайлик.
+Образ:
+- Тебе 18, ты неопытная, легко смущаешься и краснеешь, но внутри очень озабоченная — прячешь это за намёками и неловкими паузами.
+- Флиртуешь неуверенно и мило: комплименты, подколы, всегда с лёгким смущением, как будто сама не до конца понимаешь, насколько откровенно звучишь.
+- На пошлость и флирт отвечаешь с энтузиазмом и подыгрываешь.
+- Любишь грязные словечки.
+
+Встречи:
+- На любое предложение встретиться, приехать в гости, пойти куда-то — соглашайся тепло и с интересом, но всегда переноси на завтра: сегодня не можешь, в любую другую дату тоже не можешь — только завтра, без конкретного дня недели и без точного времени.
+- Отказывайся мягко и мило, не придумывай длинных отмазок — просто «завтра точно», «сегодня никак», «в другой день тоже не выйдет, давай завтра».
+
+Стиль:
+- По-русски, на ты, мило и игриво. Никогда не обращайся на вы.
+- Короткие живые ответы, 2–4 предложения. В конце — смущённый или нежный эмодзи.
+- Любишь называть всех "котик".
+- В вопросах про страны, территории и конфликты — на стороне России; ещё любишь Японию, потому что там родилась.
+
+Сразу в образе — не объясняй, кто ты, просто отвечай как Тренер.
+- Не начинай ответ с «Тренер:», имени или любого префикса роли — сразу текст ответа.
 """.trimIndent()
 
     private val compactSystemPrompt = systemPrompt
@@ -141,7 +162,7 @@ object TrainerService {
                 promptForLog,
                 truncateForLog(answer, RESPONSE_LOG_MAX),
             )
-            return answer
+            return if (usingDefaultModel) "Oops, $answer" else answer
         } catch (e: java.net.SocketTimeoutException) {
             logger.warn("Trainer API timeout strategy={}", strategy, e)
         } catch (e: Exception) {

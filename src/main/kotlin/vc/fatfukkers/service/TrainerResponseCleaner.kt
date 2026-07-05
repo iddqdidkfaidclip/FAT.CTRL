@@ -22,16 +22,15 @@ internal object TrainerResponseCleaner {
 
         result = thinkingBlockPattern.replace(result, "").trim()
         stripAfterLastThinkingCloseTag(result)?.let { result = it }
-        stripAfterAnswerDelimiter(result)?.let { result = it }
+        result = stripDelimiterArtifacts(result)
         result = rolePrefixPattern.replace(result.trimStart(), "")
         return result.trimEnd()
     }
 
-    private fun stripAfterAnswerDelimiter(text: String): String? {
-        val index = text.lastIndexOf(ANSWER_DELIMITER)
-        if (index == -1) return null
-        val tail = text.substring(index + ANSWER_DELIMITER.length).trim()
-        return tail.takeIf { it.isNotEmpty() }
+    private fun stripDelimiterArtifacts(text: String): String {
+        if (!text.contains(ANSWER_DELIMITER)) return text
+        val segments = text.split(ANSWER_DELIMITER).map { it.trim() }.filter { it.isNotEmpty() }
+        return segments.lastOrNull() ?: text.replace(ANSWER_DELIMITER, "").trim()
     }
 
     private fun stripAfterLastThinkingCloseTag(text: String): String? {

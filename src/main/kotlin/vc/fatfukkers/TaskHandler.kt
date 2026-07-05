@@ -403,8 +403,7 @@ internal fun buildTrainerQuery(rawText: String, replyToTrainerMessage: Message?)
     }
 }
 
-private const val TRAINER_TYPING_INTERVAL_MS = 10_000L
-private const val TRAINER_TYPING_PULSE_MS = 1_000L
+private const val TRAINER_TYPING_REFRESH_MS = 4_000L
 private const val TELEGRAM_MESSAGE_MAX = 4096
 
 private fun escapeHtmlForTelegram(text: String): String =
@@ -485,13 +484,17 @@ private fun Bot.askTrainerWithTyping(
     query: String,
 ): String? {
     val stopTyping = AtomicBoolean(false)
-    val typingThread = Thread {
-        while (!stopTyping.get()) {
-            sendChatAction(chatId, ChatAction.TYPING)
-            if (sleepUntil(stopTyping, TRAINER_TYPING_PULSE_MS)) break
-            if (sleepUntil(stopTyping, TRAINER_TYPING_INTERVAL_MS - TRAINER_TYPING_PULSE_MS)) break
-        }
-    }.apply {
+    val typingThread = Thread(
+        {
+            while (!stopTyping.get()) {
+                if (stopTyping.get()) break
+                sendChatAction(chatId, ChatAction.TYPING)
+                if (stopTyping.get()) break
+                if (sleepUntil(stopTyping, TRAINER_TYPING_REFRESH_MS)) break
+            }
+        },
+        "trainer-typing",
+    ).apply {
         isDaemon = true
         start()
     }
@@ -503,6 +506,7 @@ private fun Bot.askTrainerWithTyping(
     } finally {
         stopTyping.set(true)
         typingThread.interrupt()
+        typingThread.join()
     }
 }
 

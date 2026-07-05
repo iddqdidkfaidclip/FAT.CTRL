@@ -28,6 +28,9 @@ dependencies {
     // Logging
     implementation("ch.qos.logback:logback-classic:1.5.16")
 
+    // YouTube через InnerTube (NewPipe) — запасной путь, если yt-dlp блокирует VPS
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")
+
     testImplementation(kotlin("test"))
 }
 

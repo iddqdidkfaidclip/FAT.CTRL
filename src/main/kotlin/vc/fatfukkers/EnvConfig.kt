@@ -14,7 +14,7 @@ object EnvConfig {
         if (envFile != null) {
             logger.info("Loaded .env from {}", envFile.toAbsolutePath())
         } else {
-            logger.warn("No .env file found (checked ENV_FILE, ./.env, .env next to jar)")
+            logger.warn("No .env file found next to jar")
         }
     }
 
@@ -35,14 +35,8 @@ object EnvConfig {
     }
 
     private fun findEnvFile(): Path? {
-        System.getenv("ENV_FILE")?.trim()?.takeUnless { it.isBlank() }?.let { explicit ->
-            val p = Paths.get(explicit)
-            if (Files.exists(p)) return p
-        }
-        val cwd = Paths.get(".env")
-        if (Files.exists(cwd)) return cwd
-        jarDirEnv()?.let { if (Files.exists(it)) return it }
-        return null
+        val path = jarDirEnv() ?: return null
+        return path.takeIf { Files.exists(it) }
     }
 
     private fun jarDirEnv(): Path? = try {
@@ -53,17 +47,9 @@ object EnvConfig {
         null
     }
 
-    fun get(name: String): String? {
-        val fromEnv = System.getenv(name)?.trim().takeUnless { it.isNullOrBlank() }
-        if (fromEnv != null) return fromEnv
-        return dotEnv[name]?.trim().takeUnless { it.isNullOrBlank() }
-    }
+    fun get(name: String): String? =
+        dotEnv[name]?.trim().takeUnless { it.isNullOrBlank() }
 
-    fun getSource(name: String): String? {
-        val fromEnv = System.getenv(name)?.trim().takeUnless { it.isNullOrBlank() }
-        if (fromEnv != null) return "env"
-        val fromFile = dotEnv[name]?.trim().takeUnless { it.isNullOrBlank() }
-        if (fromFile != null) return "file"
-        return null
-    }
+    fun getSource(name: String): String? =
+        if (get(name) != null) "file" else null
 }

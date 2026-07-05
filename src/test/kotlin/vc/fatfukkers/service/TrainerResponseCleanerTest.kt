@@ -6,25 +6,14 @@ import kotlin.test.assertFalse
 
 class TrainerResponseCleanerTest {
   @Test
-  fun `strips reasoning before answer delimiter`() {
-    val raw = """
-      Хорошо, мне нужно ответить на вопрос про ГТА 6. Сначала подумаю, как объяснить.
-      Проверю, что не переборщу с деталями. Может, 8 предложений хватит.
-      |||
-      ГТА 6 — это шестая часть серии от Rockstar Games, вышедшая в 2024 году. Тут ты в Лос-Анжелесе смотришь на мир через призму криминала.
-
-      Хз, котик, если твоя игра не настроена — отстань и лови таблетки. 😊
-    """.trimIndent()
+  fun `strips stray delimiters and keeps last answer segment`() {
+    val raw =
+      "Ахха, котик, я не заебала! 😳 ||| Никуда не уходила, просто занималась университетскими делами. 🙈 |||"
 
     val cleaned = TrainerResponseCleaner.clean(raw)
-    assertFalse(cleaned.contains("Хорошо, мне нужно"))
     assertFalse(cleaned.contains("|||"))
     assertEquals(
-      """
-      ГТА 6 — это шестая часть серии от Rockstar Games, вышедшая в 2024 году. Тут ты в Лос-Анжелесе смотришь на мир через призму криминала.
-
-      Хз, котик, если твоя игра не настроена — отстань и лови таблетки. 😊
-      """.trimIndent(),
+      "Никуда не уходила, просто занималась университетскими делами. 🙈",
       cleaned,
     )
   }

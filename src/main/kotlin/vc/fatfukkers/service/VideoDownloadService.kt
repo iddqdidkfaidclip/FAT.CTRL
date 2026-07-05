@@ -29,7 +29,14 @@ object VideoDownloadService {
     private val galleryDlPath = EnvConfig.get("GALLERY_DL_PATH") ?: "gallery-dl"
     private val ffmpegPath = EnvConfig.get("FFMPEG_PATH")
     private val cookiesPath = EnvConfig.get("IG_COOKIES_PATH")
+    private val youtubeCookiesPath = EnvConfig.get("YTDLP_YT_COOKIES_PATH")
     private val jsRuntime = EnvConfig.get("YTDLP_JS_RUNTIME")
+
+    private val youtubePlayerClientAttempts = listOf(
+        "web,mweb,android",
+        "default,-android_sdkless",
+        "ios",
+    )
     private val tempDir: Path = Paths.get(EnvConfig.get("VIDEO_DOWNLOAD_DIR") ?: "./tmp/videos")
 
     /** Не начинать скачивание, если ролик длиннее (сек). По умолчанию 1 час. */
@@ -71,6 +78,7 @@ object VideoDownloadService {
     fun onStartup() {
         try {
             Files.createDirectories(tempDir)
+            YoutubeNewPipeDownloader.ensureInitialized()
             val removed = cleanupTempDir()
             logger.info(
                 "Video download: ytdlp={} galleryDl={} ffmpeg={} cookies={} jsRuntime={} tempDir={} " +
@@ -98,30 +106,63 @@ object VideoDownloadService {
             return DownloadOutcome.Err(downloadFail("на сервере не установлен yt-dlp"))
         }
 
-        val metadata = fetchMetadata(url)
+        val resolved = resolvedDownloadUrl(url)
+        val metadata = fetchMetadata(resolved)
         validateBeforeDownload(metadata)?.let { return it }
 
-        if (isInstagramPost(url)) {
-            logger.info("Instagram post {}, downloading carousel", url)
-            downloadInstagramCarousel(url, newId(), metadata.title)?.let { return it }
-            logger.info("carousel download failed for {}, trying gallery-dl", url)
-            downloadInstagramGallery(url, newId(), metadata.title)?.let { return it }
-            return DownloadOutcome.Err(instagramFailureMessage(url))
+        if (isInstagramPost(resolved)) {
+            logger.info("Instagram post {}, downloading carousel", resolved)
+            downloadInstagramCarousel(resolved, newId(), metadata.title)?.let { return it }
+            logger.info("carousel download failed for {}, trying gallery-dl", resolved)
+            downloadInstagramGallery(resolved, newId(), metadata.title)?.let { return it }
+            return DownloadOutcome.Err(instagramFailureMessage(resolved))
         }
 
-        downloadVideo(url, format = videoFormat(url), id = newId(), title = metadata.title)?.let { return it }
+        if (isYoutube(resolved)) {
+            logger.info("Trying NewPipe Extractor for {}", resolved)
+            downloadYoutubeViaNewPipe(resolved, metadata.title)?.let { return it }
 
-        if (isInstagram(url)) {
-            return DownloadOutcome.Err(instagramFailureMessage(url))
+            logger.info("Trying Piped API for {}", resolved)
+            downloadYoutubeViaPiped(resolved, metadata.title)?.let { return it }
+
+            for ((index, playerClient) in youtubePlayerClientAttempts.withIndex()) {
+                if (index > 0) {
+                    logger.info("Retrying YouTube with player_client={} for {}", playerClient, resolved)
+                }
+                downloadVideo(
+                    resolved,
+                    format = videoFormat(resolved),
+                    id = newId(),
+                    title = metadata.title,
+                    playerClient = playerClient,
+                )?.let { return it }
+            }
+
+            logger.info("Retrying YouTube download with low quality for {}", resolved)
+            for (playerClient in youtubePlayerClientAttempts) {
+                downloadVideo(
+                    resolved,
+                    format = "18",
+                    id = newId(),
+                    title = metadata.title,
+                    playerClient = playerClient,
+                )?.let { return it }
+            }
+        } else {
+            downloadVideo(
+                resolved,
+                format = videoFormat(resolved),
+                id = newId(),
+                title = metadata.title,
+            )?.let { return it }
+
+            if (isInstagram(resolved)) {
+                return DownloadOutcome.Err(instagramFailureMessage(resolved))
+            }
         }
 
-        if (isYoutube(url)) {
-            logger.info("Retrying YouTube download with low quality for {}", url)
-            downloadVideo(url, format = "18", id = newId(), title = metadata.title)?.let { return it }
-        }
-
-        logger.info("Video download failed, trying audio fallback for {}", url)
-        return downloadAudio(url, newId(), metadata.title)
+        logger.info("Video download failed, trying audio fallback for {}", resolved)
+        return downloadAudio(resolved, newId(), metadata.title)
     }
 
     private fun newId(): String = UUID.randomUUID().toString()
@@ -155,15 +196,64 @@ object VideoDownloadService {
     private fun videoFormat(url: String): String =
         if (isYoutube(url)) "b" else "best[filesize<45M]/best[height<=720]/best"
 
-    private fun downloadVideo(url: String, format: String, id: String, title: String): DownloadOutcome? {
+    private fun downloadYoutubeViaNewPipe(url: String, fallbackTitle: String): DownloadOutcome? {
+        val id = newId()
+        val result = YoutubeNewPipeDownloader.download(url, tempDir, id) ?: return null
+        return validateDownloadedFile(result.file, id, result.title.ifBlank { fallbackTitle }, MediaKind.VIDEO)
+    }
+
+    private fun downloadYoutubeViaPiped(url: String, fallbackTitle: String): DownloadOutcome? {
+        val id = newId()
+        val result = YoutubePipedDownloader.download(url, tempDir, id) ?: return null
+        return validateDownloadedFile(result.file, id, result.title.ifBlank { fallbackTitle }, MediaKind.VIDEO)
+    }
+
+    private fun validateDownloadedFile(
+        file: Path,
+        id: String,
+        title: String,
+        mediaKind: MediaKind,
+    ): DownloadOutcome? {
+        return try {
+            val size = Files.size(file)
+            if (size == 0L) {
+                cleanupFiles(id)
+                return DownloadOutcome.Err(downloadFail("скачался пустой файл"))
+            }
+            if (size > TELEGRAM_MAX_BYTES) {
+                cleanupFiles(id)
+                return DownloadOutcome.Err(
+                    downloadFail("видео больше 45 МБ — Telegram не примет, попробуй короче ролик", pingAdmin = false),
+                )
+            }
+            DownloadOutcome.Ok(
+                DownloadResult(
+                    title = title,
+                    items = listOf(MediaItem(file, mediaKind)),
+                ),
+            )
+        } catch (e: Exception) {
+            cleanupFiles(id)
+            logger.warn("Downloaded file validation failed for {}", file, e)
+            null
+        }
+    }
+
+    private fun downloadVideo(
+        url: String,
+        format: String,
+        id: String,
+        title: String,
+        playerClient: String? = null,
+    ): DownloadOutcome? {
         val outTemplate = tempDir.resolve("dl-$id.%(ext)s").toString()
-        val args = baseArgs(outTemplate) +
+        val args = baseArgs(outTemplate, url) +
             playlistArgs(url) +
-            platformArgs(url) +
+            platformArgs(url, playerClient) +
             listOf(
                 "-f", format,
                 "--merge-output-format", "mp4",
-                instagramDownloadUrl(url),
+                url,
             )
         val outcome = runDownload(args, url, id, mediaKind = MediaKind.VIDEO, title = title)
         return outcome as? DownloadOutcome.Ok
@@ -171,14 +261,14 @@ object VideoDownloadService {
 
     private fun downloadAudio(url: String, id: String, title: String): DownloadOutcome {
         val outTemplate = tempDir.resolve("dl-$id.%(ext)s").toString()
-        val args = baseArgs(outTemplate) +
+        val args = baseArgs(outTemplate, url) +
             playlistArgs(url) +
             platformArgs(url) +
             listOf(
                 "-f", if (isYoutube(url)) "b/a" else "bestaudio/best",
                 "-x",
                 "--audio-format", "m4a",
-                instagramDownloadUrl(url),
+                url,
             )
         return runDownload(args, url, id, mediaKind = MediaKind.AUDIO, title = title)
     }
@@ -301,7 +391,7 @@ object VideoDownloadService {
             "--print", "title:%(title)s",
             "--print", "duration:%(duration)s",
             "--print", "filesize:%(filesize_approx)s",
-        ) + playlistArgs(url) + platformArgs(url) + instagramDownloadUrl(url)
+        ) + playlistArgs(url) + platformArgs(url) + url
 
         return try {
             val output = runProcessOutput(args, META_TIMEOUT_SECONDS)
@@ -329,17 +419,27 @@ object VideoDownloadService {
         }
     }
 
-    private fun platformArgs(url: String): List<String> {
+    private fun platformArgs(url: String, playerClient: String? = null): List<String> {
         if (!isYoutube(url)) return emptyList()
 
+        val client = playerClient ?: youtubePlayerClientAttempts.first()
         val args = mutableListOf(
-            "--extractor-args", "youtube:player_client=android,web",
+            "--extractor-args", "youtube:player_client=$client",
             "--remote-components", "ejs:github",
         )
         jsRuntime?.let {
             args += listOf("--js-runtimes", it)
         }
+        youtubeCookiesPath?.let {
+            args += listOf("--cookies", it)
+        }
         return args
+    }
+
+    private fun resolvedDownloadUrl(url: String): String = when {
+        isYoutube(url) -> YoutubeUrlNormalizer.normalize(url)
+        isInstagram(url) -> instagramPostUrl(url)
+        else -> url
     }
 
     private fun isYoutube(url: String): Boolean {
@@ -389,15 +489,12 @@ object VideoDownloadService {
         url
     }
 
-    private fun instagramDownloadUrl(url: String): String =
-        if (isInstagram(url)) instagramPostUrl(url) else url
-
     private fun playlistArgs(url: String): List<String> =
         if (isInstagram(url)) emptyList() else listOf("--no-playlist")
 
     private val videoExtensions = setOf("mp4", "mov", "webm", "mkv", "m4v")
 
-    private fun baseArgs(output: String): MutableList<String> {
+    private fun baseArgs(output: String, url: String): MutableList<String> {
         val args = mutableListOf(
             ytdlpPath,
             "--no-warnings",
@@ -408,8 +505,10 @@ object VideoDownloadService {
         ffmpegPath?.let {
             args += listOf("--ffmpeg-location", it)
         }
-        cookiesPath?.let {
-            args += listOf("--cookies", it)
+        if (isInstagram(url)) {
+            cookiesPath?.let {
+                args += listOf("--cookies", it)
+            }
         }
         return args
     }
@@ -498,16 +597,10 @@ object VideoDownloadService {
         if (isInstagram(url)) {
             return instagramFailureMessage(url, output)
         }
-        if (!isYoutube(url)) {
-            return downloadFail("ссылка недоступна")
+        if (isYoutube(url)) {
+            return youtubeFailureMessage(ytdlpErrorSnippet(output))
         }
-        val needsJs = output.contains("JavaScript runtime", ignoreCase = true) ||
-            output.contains("jsc", ignoreCase = true)
-        return if (needsJs) {
-            downloadFail("YouTube требует Deno — curl -fsSL https://deno.land/install.sh | sh")
-        } else {
-            downloadFail("проверь ffmpeg и права на $tempDir")
-        }
+        return downloadFail("ссылка недоступна")
     }
 
     private fun ytdlpErrorSnippet(output: String): String =
@@ -569,13 +662,39 @@ object VideoDownloadService {
         if (!isYoutube(url) && snippet.contains("login", ignoreCase = true)) {
             return instagramCookiesMessage()
         }
-        if (snippet.contains("JavaScript runtime", ignoreCase = true)) {
-            return downloadFail("YouTube требует Deno — curl -fsSL https://deno.land/install.sh | sh")
-        }
-        if (snippet.contains("403", ignoreCase = true) || snippet.contains("Forbidden", ignoreCase = true)) {
-            return downloadFail("YouTube отклонил скачивание — установи Deno и ffmpeg")
+        if (isYoutube(url)) {
+            return youtubeFailureMessage(snippet)
         }
         return downloadFail("ссылка недоступна")
+    }
+
+    private fun youtubeFailureMessage(snippet: String): String {
+        if (snippet.contains("JavaScript runtime", ignoreCase = true) ||
+            snippet.contains("n challenge solving failed", ignoreCase = true) ||
+            snippet.contains("challenge solver", ignoreCase = true)
+        ) {
+            return downloadFail("YouTube требует Deno — curl -fsSL https://deno.land/install.sh | sh")
+        }
+        if (snippet.contains("not a bot", ignoreCase = true) ||
+            snippet.contains("Sign in to confirm", ignoreCase = true) ||
+            snippet.contains("LOGIN_REQUIRED", ignoreCase = true)
+        ) {
+            return if (youtubeCookiesPath != null) {
+                downloadFail("YouTube не принял cookies — экспортируй свежие youtube_cookies.txt")
+            } else {
+                downloadFail("YouTube заблокировал VPS — добавь YTDLP_YT_COOKIES_PATH (cookies из браузера)")
+            }
+        }
+        if (snippet.contains("403", ignoreCase = true) || snippet.contains("Forbidden", ignoreCase = true)) {
+            return downloadFail("YouTube отклонил скачивание — обнови yt-dlp и Deno")
+        }
+        if (snippet.contains("Video unavailable", ignoreCase = true) ||
+            snippet.contains("Private video", ignoreCase = true) ||
+            snippet.contains("This video is not available", ignoreCase = true)
+        ) {
+            return downloadFail("видео недоступно на YouTube", pingAdmin = false)
+        }
+        return downloadFail("YouTube не отдал видео — обнови yt-dlp на сервере")
     }
 
     private fun galleryDlCandidates(): List<List<String>> {
