@@ -13,6 +13,7 @@ import vc.fatfukkers.service.ForecastResult
 import vc.fatfukkers.service.ForecastService
 import vc.fatfukkers.service.ImageCaptionPhrases
 import vc.fatfukkers.service.ImageSearchService
+import vc.fatfukkers.service.NewsRegion
 import vc.fatfukkers.service.NewsService
 import vc.fatfukkers.service.TelegramAnimationSender
 import vc.fatfukkers.service.TrainerMessageRegistry
@@ -39,7 +40,11 @@ private val showImageWorker = Executors.newCachedThreadPool { runnable ->
 
 private val showImageQueryPattern = Regex("""^\s*покажи(\s+|$)""", RegexOption.IGNORE_CASE)
 internal val newsQueryPattern = Regex(
-    """^\s*(расскажи\s+)?новости(\s+за\s+вчера)?\s*$""",
+    """^\s*(расскажи\s+|прокомментируй\s+)?новости(\s+за\s+вчера)?\s*$""",
+    RegexOption.IGNORE_CASE,
+)
+internal val ukraineNewsQueryPattern = Regex(
+    """^\s*(расскажи\s+)?что\s+там\s+у\s+хохлов\s*$""",
     RegexOption.IGNORE_CASE,
 )
 
@@ -231,24 +236,39 @@ fun Bot.handleTask(
             if (newsQueryPattern.matches(forgetQuery)) {
                 val replyToMessageId = message.messageId
                 TrainerQueue.submit(u.telegramId) {
-                    sendTrainerNews(chatId, zoneId, replyToMessageId)
+                    sendTrainerNews(chatId, replyToMessageId, NewsRegion.RU)
                 }
                 return
             }
-            val replyToMessageId = message.messageId
-            val telegramUserId = u.telegramId
-            TrainerQueue.submit(telegramUserId) {
-                val answer = askTrainerWithTyping(chatId, telegramUserId, query)
-                val text = answer?.takeIf { it.isNotBlank() }
-                    ?: "Я сейчас недоступна 💔 (скорее всего виноват Макс)"
-                if (!sendTrainerAnswer(chatId, text, replyToMessageId, query)) {
-                    sendTrainerMessage(
-                        chatId = chatId,
-                        text = "не смогла отправить ответ тренера",
-                        allowSendingWithoutReply = true,
-                    )
+            if (ukraineNewsQueryPattern.matches(forgetQuery)) {
+                val replyToMessageId = message.messageId
+                TrainerQueue.submit(u.telegramId) {
+                    sendTrainerNews(chatId, replyToMessageId, NewsRegion.UA)
                 }
+                return
             }
+            // Временно тренер не обращается к нейросети — модель не нашли.
+            // Когда найдётся нормальная модель, раскомментировать блок ниже и убрать заглушку.
+            sendTrainerMessage(
+                chatId = chatId,
+                text = "Прости, котик, я оказалась слишком тупа чтобы разговаривать  \uD83D\uDC94 " +
+                    "Могу разве что прокомментировать новости или рассказать что там у хохлов",
+                replyToMessageId = message.messageId,
+            )
+            // val replyToMessageId = message.messageId
+            // val telegramUserId = u.telegramId
+            // TrainerQueue.submit(telegramUserId) {
+            //     val answer = askTrainerWithTyping(chatId, telegramUserId, query)
+            //     val text = answer?.takeIf { it.isNotBlank() }
+            //         ?: "Я сейчас недоступна 💔 (скорее всего виноват Макс)"
+            //     if (!sendTrainerAnswer(chatId, text, replyToMessageId, query)) {
+            //         sendTrainerMessage(
+            //             chatId = chatId,
+            //             text = "не смогла отправить ответ тренера",
+            //             allowSendingWithoutReply = true,
+            //         )
+            //     }
+            // }
         }
     }
 }
@@ -494,7 +514,7 @@ private fun Bot.sendTrainerAnswer(
     return false
 }
 
-private fun Bot.sendTrainerNews(chatId: ChatId, zoneId: ZoneId, replyToMessageId: Long) {
+private fun Bot.sendTrainerNews(chatId: ChatId, replyToMessageId: Long, region: NewsRegion) {
     val stopTyping = AtomicBoolean(false)
     val typingThread = Thread(
         {
@@ -510,19 +530,26 @@ private fun Bot.sendTrainerNews(chatId: ChatId, zoneId: ZoneId, replyToMessageId
     }
 
     val text = try {
-        val items = NewsService.fetchTopHeadlines(zoneId)
+        val items = NewsService.fetchTopHeadlines(region)
         if (items.isEmpty()) {
-            "котик, сейчас не смогла найти свежие новости — попробуй позже 📰"
+            when (region) {
+                NewsRegion.RU -> "котик, сейчас не смогла найти свежие новости — попробуй позже 📰"
+                NewsRegion.UA -> "котик, сейчас не смогла найти свежие новости у хохлов — попробуй позже 📰"
+            }
         } else {
-            val comments = NewsService.buildComments(items) { TrainerService.askOneShot(it) }
+            val comments = NewsService.buildComments(
+                items,
+                ask = { TrainerService.askOneShot(it) },
+                region = region,
+            )
             if (comments != null) {
-                NewsService.assembleDigest(items, comments)
+                NewsService.assembleDigest(items, comments, region)
             } else {
-                NewsService.formatHeadlinesFallback(items)
+                NewsService.formatHeadlinesFallback(items, region)
             }
         }
     } catch (e: Exception) {
-        taskHandlerLogger.warn("Trainer news failed", e)
+        taskHandlerLogger.warn("Trainer news failed region={}", region, e)
         "не смогла собрать новости — попробуй позже 💔"
     }
 
@@ -530,7 +557,11 @@ private fun Bot.sendTrainerNews(chatId: ChatId, zoneId: ZoneId, replyToMessageId
     typingThread.interrupt()
     typingThread.join()
 
-    if (!sendTrainerAnswer(chatId, text, replyToMessageId, "новости", preformattedHtml = true)) {
+    val queryLabel = when (region) {
+        NewsRegion.RU -> "новости"
+        NewsRegion.UA -> "что там у хохлов"
+    }
+    if (!sendTrainerAnswer(chatId, text, replyToMessageId, queryLabel, preformattedHtml = true)) {
         sendTrainerMessage(
             chatId = chatId,
             text = "не смогла отправить новости",

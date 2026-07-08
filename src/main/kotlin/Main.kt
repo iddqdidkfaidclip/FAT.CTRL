@@ -49,7 +49,8 @@ private fun commandsHelpText(): String = """
    <i>пример: тренер как начать бегать?</i>
    <i>картинка: покажи ... / тренер покажи ...</i>
    <i>забыть диалог: тренер забудь / тренер забудь всё</i>
-   <i>новости: тренер новости — топ-10 актуальных заголовков</i>
+   <i>новости: тренер новости — топ-10 актуальных заголовков (Россия)</i>
+   <i>хохлы: тренер что там у хохлов — топ-10 новостей Украины</i>
    <i>ответь реплаем на сообщение тренера — сработает так же, с учётом контекста</i>
 
 📥 <b>ссылка YouTube / Instagram</b> — скачать видео или фото
@@ -100,6 +101,8 @@ fun main() {
 
         dispatch {
             command("start") {
+                val firstToken = message.text?.trim()?.split(Regex("\\s+"))?.firstOrNull()
+                if (!firstToken.equals("/start@FAT_CTRL_BOT", ignoreCase = true)) return@command
                 val u = UserService.upsertFromUpdate(update)
                 logger.info("start with user id: ${u.telegramId}")
                 bot.sendMessage(

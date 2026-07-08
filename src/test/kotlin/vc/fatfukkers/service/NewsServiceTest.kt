@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import vc.fatfukkers.newsQueryPattern
+import vc.fatfukkers.ukraineNewsQueryPattern
+import vc.fatfukkers.service.NewsRegion
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -43,11 +45,32 @@ class NewsServiceTest {
 
     @Test
     fun `buildFeedSources prefers Yandex then live RSS feeds`() {
-        val sources = NewsService.buildFeedSources(ZoneId.of("Europe/Moscow"))
+        val sources = NewsService.buildFeedSources(NewsRegion.RU)
         assertEquals(NewsService.YANDEX_NEWS_SOURCE, sources.first())
         assertTrue(sources.any { it.contains("tass.ru") })
         assertTrue(sources.any { it.contains("ria.ru/export/rss2/index.xml") })
         assertTrue(!sources.any { it.contains("archive") })
+    }
+
+    @Test
+    fun `buildFeedSources for Ukraine uses Google then UA RSS feeds`() {
+        val sources = NewsService.buildFeedSources(NewsRegion.UA)
+        assertTrue(sources.first().contains("news.google.com"))
+        assertTrue(sources.any { it.contains("unian.ua") })
+        assertTrue(sources.any { it.contains("pravda.com.ua") })
+        assertTrue(!sources.any { it == NewsService.YANDEX_NEWS_SOURCE })
+        assertTrue(!sources.any { it.contains("tass.ru") })
+    }
+
+    @Test
+    fun `primaryFeedUrl for Ukraine points to Google news`() {
+        assertTrue(NewsService.primaryFeedUrl(NewsRegion.UA).contains("news.google.com"))
+    }
+
+    @Test
+    fun `buildCommentsPrompt for Ukraine requires Russian comments`() {
+        val prompt = NewsService.buildCommentsPrompt(listOf(NewsItem("Тест", "")), NewsRegion.UA)
+        assertTrue(prompt.contains("по-русски", ignoreCase = true))
     }
 
     @Test
@@ -120,6 +143,14 @@ class NewsServiceTest {
         assertTrue(text.contains("⚡ <i>Заголовок Б</i>"))
         assertTrue(text.contains("↳ <b>коммент а 🩷</b>"))
         assertTrue(text.contains("↳ <b>коммент б 😳</b>"))
+        assertTrue(text.contains("↳ <b>коммент а 🩷</b>\n\n⚡ <i>Заголовок Б</i>"))
+    }
+
+    @Test
+    fun `assembleDigest for Ukraine uses khokhly intro`() {
+        val items = listOf(NewsItem("Заголовок", "https://a"))
+        val text = NewsService.assembleDigest(items, listOf("коммент 🩷"), NewsRegion.UA)
+        assertTrue(text.contains("что там у хохлов"))
     }
 
     @Test
@@ -150,5 +181,21 @@ class NewsQueryPatternTest {
     fun `does not match unrelated queries`() {
         assertTrue(!newsQueryPattern.matches("новости про спорт"))
         assertTrue(!newsQueryPattern.matches("расскажи анекдот"))
+    }
+}
+
+class UkraineNewsQueryPatternTest {
+
+    @Test
+    fun `matches ukraine news commands`() {
+        assertTrue(ukraineNewsQueryPattern.matches("что там у хохлов"))
+        assertTrue(ukraineNewsQueryPattern.matches("расскажи что там у хохлов"))
+        assertTrue(ukraineNewsQueryPattern.matches("  Что   там   у   хохлов  "))
+    }
+
+    @Test
+    fun `does not match unrelated queries`() {
+        assertTrue(!ukraineNewsQueryPattern.matches("что там у хохлов про войну"))
+        assertTrue(!ukraineNewsQueryPattern.matches("новости"))
     }
 }
