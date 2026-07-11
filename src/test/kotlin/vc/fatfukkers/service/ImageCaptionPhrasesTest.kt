@@ -70,7 +70,7 @@ class ImageCaptionPhrasesTest {
         val query = "как котики ходят"
         val caption = ImageCaptionPhrases.random(query, Random(0))
         assertTrue(caption.contains(query))
-        assertTrue(clauseTemplates.any { template -> caption == template.format(query) })
+        assertFalse(caption.contains("на как"))
     }
 
     @Test
@@ -85,20 +85,5 @@ class ImageCaptionPhrasesTest {
         val plane = ImageCaptionPhrases.random("как самолет летит", Random(42))
         assertTrue(plane.contains("как самолет летит"))
         assertFalse(plane.contains("на как"))
-    }
-
-    private companion object {
-        val clauseTemplates = listOf(
-            "Ты хотел увидеть %s — доволен?",
-            "Вот %s, как и заказывал",
-            "Смотри: %s",
-            "Лови: %s",
-            "Вот то, что ты просил: %s",
-            "Твой запрос — %s, ну как?",
-            "Запоминай: %s",
-            "Результат поиска: %s",
-            "Наслаждайся: %s",
-            "Держи, это %s",
-        )
     }
 }

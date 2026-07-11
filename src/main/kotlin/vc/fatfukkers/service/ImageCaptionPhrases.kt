@@ -36,16 +36,16 @@ object ImageCaptionPhrases {
         Template("Вот %s, теперь это официально твой патронус", Case.NOMINATIVE),
         Template("Смотри на %s и делай скрин, пока бесплатно", Case.ACCUSATIVE),
         Template("Смотри на %s, а потом на себя в зеркало.", Case.ACCUSATIVE),
-        Template("Вот %s — нашла у тебя на рабочем столе»", Case.NOMINATIVE),
+        Template("Вот %s — нашла у тебя на рабочем столе", Case.NOMINATIVE),
         Template("Вот %s — и да, я всё это логирую", Case.NOMINATIVE),
-        Template("%s лучше чем твой дикпик»", Case.NOMINATIVE),
-        Template("Вот %s — нашла у тебя на рабочем столе»", Case.NOMINATIVE),
-        Template("Вот ты и узнал как выглядит %s»", Case.NOMINATIVE),
-        Template("Вот %s — нашла у тебя под кроватью»", Case.NOMINATIVE),
-        Template("Я бы смотрела на %s вечно»", Case.NOMINATIVE),
-        Template("О, мой любимый вид на %s»", Case.NOMINATIVE),
-        Template("Завтра все увидят %s и тебе станет стыдно»", Case.NOMINATIVE),
-        Template("А с этого ракурса %s выглядит прямо как твоя задница»", Case.NOMINATIVE),
+        Template("%s лучше чем твой дикпик", Case.NOMINATIVE),
+        Template("Вот %s — нашла у тебя на рабочем столе", Case.NOMINATIVE),
+        Template("Вот ты и узнал как выглядит %s", Case.NOMINATIVE),
+        Template("Вот %s — нашла у тебя под кроватью", Case.NOMINATIVE),
+        Template("Я бы смотрела на %s вечно", Case.NOMINATIVE),
+        Template("О, мой любимый вид на %s", Case.NOMINATIVE),
+        Template("Завтра все увидят %s и тебе станет стыдно", Case.NOMINATIVE),
+        Template("А с этого ракурса %s выглядит прямо как твоя задница", Case.NOMINATIVE),
         Template("Вот тебе %s — и не спрашивай, откуда у меня это", Case.ACCUSATIVE),
         Template("Держи %s, раз уж ты дошёл до такого", Case.ACCUSATIVE),
         Template("Глянь на %s и скажи честно: ты доволен?", Case.ACCUSATIVE),
@@ -56,23 +56,18 @@ object ImageCaptionPhrases {
         Template("Смотри на %s, раз уж ты решил позориться публично", Case.ACCUSATIVE),
     )
 
-    private val clauseTemplates = listOf(
-        "Ты хотел увидеть %s — доволен?",
-        "Вот %s, как и заказывал",
-        "Смотри: %s",
-        "Лови: %s",
-        "Вот то, что ты просил: %s",
-        "Твой запрос — %s, ты доволен?",
-        "Запоминай как выглядит %s",
-        "Первый раз вижу как выглядит %s",
-        "Наслаждайся: %s",
-        "Держи, это %s",
-    )
+    private val clauseTemplates = nounTemplates.map { it.text }
 
     fun random(query: String, random: Random = Random.Default): String {
         val normalized = query.trim().lowercase(Locale("ru", "RU"))
         return if (RussianMorph.isClauseLike(normalized)) {
-            clauseTemplates.random(random).format(normalized)
+            val template = clauseTemplates.random(random)
+            val sanitizedTemplate = if (normalized.startsWith("как ")) {
+                template.replace("на %s", "%s")
+            } else {
+                template
+            }
+            sanitizedTemplate.format(normalized)
         } else {
             val template = nounTemplates.random(random)
             val word = when (template.wordCase) {
