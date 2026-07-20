@@ -18,6 +18,7 @@ object ImageSearchService {
     private const val MAX_BYTES = 10 * 1024 * 1024
     private const val MAX_DOWNLOAD_ATTEMPTS = 8
     private const val RECENT_URLS_PER_QUERY = 20
+    private const val RECENT_GIF_URLS_GLOBAL = 5
     private const val USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -35,12 +36,13 @@ object ImageSearchService {
     private val bingUrlPattern = Regex("""murl&quot;:&quot;([^&]+)""")
 
     private val recentUrlsByQuery = ConcurrentHashMap<String, ArrayDeque<String>>()
+    private val recentGifUrls = ArrayDeque<String>()
 
     fun searchImageBytes(query: String): ByteArray? =
         searchBytes(query) { _, bytes -> bytes }
 
     fun searchGifBytes(query: String): ByteArray? =
-        searchBytes(query) { _, bytes -> bytes.takeIf(::isGif) }
+        searchBytes(query, useGlobalGifDedup = true) { _, bytes -> bytes.takeIf(::isGif) }
 
     fun isGif(bytes: ByteArray): Boolean =
         bytes.size >= 6 &&
@@ -48,7 +50,11 @@ object ImageSearchService {
             bytes[1] == 'I'.code.toByte() &&
             bytes[2] == 'F'.code.toByte()
 
-    private fun searchBytes(query: String, accept: (String, ByteArray) -> ByteArray?): ByteArray? {
+    private fun searchBytes(
+        query: String,
+        useGlobalGifDedup: Boolean = false,
+        accept: (String, ByteArray) -> ByteArray?,
+    ): ByteArray? {
         val encoded = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8)
         val queryKey = normalizeQuery(query)
 
@@ -57,8 +63,7 @@ object ImageSearchService {
             addAll(findBingUrls(encoded))
         }.distinct()
 
-        val freshCandidates = allCandidates.filterNot { isRecent(queryKey, it) }
-        val candidates = freshCandidates.ifEmpty { allCandidates }
+        val candidates = selectCandidates(allCandidates, queryKey, useGlobalGifDedup)
 
         var attempts = 0
         for (url in candidates) {
@@ -66,12 +71,34 @@ object ImageSearchService {
             downloadImage(url)?.let { bytes ->
                 accept(queryKey, bytes)?.let { accepted ->
                     rememberUrl(queryKey, url)
+                    if (useGlobalGifDedup) {
+                        rememberGifUrl(url)
+                    }
                     return accepted
                 }
             }
             attempts++
         }
         return null
+    }
+
+    internal fun selectCandidates(
+        allCandidates: List<String>,
+        queryKey: String,
+        useGlobalGifDedup: Boolean,
+    ): List<String> {
+        if (!useGlobalGifDedup) {
+            val freshForQuery = allCandidates.filterNot { isRecent(queryKey, it) }
+            return freshForQuery.ifEmpty { allCandidates }
+        }
+
+        val notGlobalRecent = allCandidates.filterNot { isRecentGifGlobally(it) }
+        val freshForQueryAndGlobal = notGlobalRecent.filterNot { isRecent(queryKey, it) }
+        return when {
+            freshForQueryAndGlobal.isNotEmpty() -> freshForQueryAndGlobal
+            notGlobalRecent.isNotEmpty() -> notGlobalRecent
+            else -> allCandidates
+        }
     }
 
     fun extensionFor(bytes: ByteArray): String = when {
@@ -102,6 +129,30 @@ object ImageSearchService {
             }
         }
     }
+
+    private fun isRecentGifGlobally(url: String): Boolean =
+        synchronized(recentGifUrls) { url in recentGifUrls }
+
+    private fun rememberGifUrl(url: String) {
+        synchronized(recentGifUrls) {
+            recentGifUrls.remove(url)
+            recentGifUrls.addLast(url)
+            while (recentGifUrls.size > RECENT_GIF_URLS_GLOBAL) {
+                recentGifUrls.removeFirst()
+            }
+        }
+    }
+
+    internal fun rememberGifUrlForTest(url: String) = rememberGifUrl(url)
+
+    internal fun rememberUrlForTest(queryKey: String, url: String) = rememberUrl(queryKey, url)
+
+    internal fun clearRecentGifUrlsForTest() {
+        synchronized(recentGifUrls) { recentGifUrls.clear() }
+    }
+
+    internal fun recentGifUrlsForTest(): List<String> =
+        synchronized(recentGifUrls) { recentGifUrls.toList() }
 
     private fun findYandexUrls(encodedQuery: String): List<String> {
         val html = get("https://yandex.ru/images/search?text=$encodedQuery") ?: return emptyList()
