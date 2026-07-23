@@ -28,3 +28,18 @@ export BOT_TZ="UTC"
   - **max 1 activity assignment per user per day**
   (these are enforced by DB unique indexes)
 
+### Telegram jokes import
+- Bot can answer `расскажи анекдот` and `тренер расскажи анекдот`.
+- Jokes are read from `src/main/resources/jokes.txt` (blocks separated by a line with `---`).
+- To rebuild jokes base from Telegram HTML export:
+
+```bash
+python3 scripts/import_jokes_from_html.py
+```
+
+Or from js/json export:
+
+```bash
+./gradlew importTelegramJokes -Psource="/absolute/path/to/ChatExport"
+```
+

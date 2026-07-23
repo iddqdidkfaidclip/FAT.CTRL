@@ -27,6 +27,7 @@ dependencies {
 
     // Logging
     implementation("ch.qos.logback:logback-classic:1.5.16")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 
     // YouTube через InnerTube (NewPipe) — запасной путь, если yt-dlp блокирует VPS
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.3")
@@ -58,4 +59,19 @@ tasks.register("fatJar") {
     group = "build"
     description = "Собрать fat-jar для деплоя на сервер → build/libs/fatctrlbot.jar"
     dependsOn(tasks.named("shadowJar"))
+}
+
+tasks.register<JavaExec>("importTelegramJokes") {
+    group = "tools"
+    description = "Импортирует анекдоты из Telegram ChatExport (js/json)"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("vc.fatfukkers.tools.TelegramJokesImporter")
+
+    val sourcePath = (project.findProperty("source") as String?)?.trim().orEmpty()
+    val outputPath = (project.findProperty("output") as String?)?.trim()
+        ?: "src/main/resources/jokes.txt"
+    if (sourcePath.isBlank()) {
+        throw GradleException("Pass Telegram export path: -Psource='/path/to/ChatExport/js'")
+    }
+    args(sourcePath, outputPath)
 }

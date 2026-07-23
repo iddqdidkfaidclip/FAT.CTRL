@@ -13,6 +13,7 @@ import vc.fatfukkers.service.ForecastResult
 import vc.fatfukkers.service.ForecastService
 import vc.fatfukkers.service.ImageCaptionPhrases
 import vc.fatfukkers.service.ImageSearchService
+import vc.fatfukkers.service.JokesService
 import vc.fatfukkers.service.NewsRegion
 import vc.fatfukkers.service.NewsService
 import vc.fatfukkers.service.TelegramAnimationSender
@@ -45,6 +46,10 @@ internal val newsQueryPattern = Regex(
 )
 internal val ukraineNewsQueryPattern = Regex(
     """^\s*(расскажи\s+)?что\s+там\s+у\s+хохлов\s*$""",
+    RegexOption.IGNORE_CASE,
+)
+internal val jokeQueryPattern = Regex(
+    """^\s*(расскажи\s+)?анекдот(ик)?\s*[!.?]*\s*$""",
     RegexOption.IGNORE_CASE,
 )
 
@@ -245,6 +250,14 @@ fun Bot.handleTask(
                 TrainerQueue.submit(u.telegramId) {
                     sendTrainerNews(chatId, replyToMessageId, NewsRegion.UA)
                 }
+                return
+            }
+            if (jokeQueryPattern.matches(forgetQuery)) {
+                sendTrainerMessage(
+                    chatId = chatId,
+                    text = JokesService.random(),
+                    replyToMessageId = message.messageId,
+                )
                 return
             }
             // Временно тренер не обращается к нейросети — модель не нашли.

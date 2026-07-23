@@ -14,6 +14,7 @@ import vc.fatfukkers.detectVideoUrl
 import vc.fatfukkers.handleTask
 import vc.fatfukkers.handleTrainerDelete
 import vc.fatfukkers.handleVideoDownload
+import vc.fatfukkers.jokeQueryPattern
 import vc.fatfukkers.service.ActivityService
 import vc.fatfukkers.service.TrainerMessageRegistry
 import vc.fatfukkers.service.UserService
@@ -51,6 +52,7 @@ private fun commandsHelpText(): String = """
    <i>забыть диалог: тренер забудь / тренер забудь всё</i>
    <i>новости: тренер новости — топ-10 актуальных заголовков (Россия)</i>
    <i>хохлы: тренер что там у хохлов — топ-10 новостей Украины</i>
+   <i>анекдот: расскажи анекдот / тренер расскажи анекдот</i>
    <i>ответь реплаем на сообщение тренера — сработает так же, с учётом контекста</i>
 
 📥 <b>ссылка YouTube / Instagram</b> — скачать видео или фото
@@ -164,6 +166,18 @@ ${commandsHelpText()}
                 // }
 
                 if (trainerShowImagePattern.containsMatchIn(rawOriginal)) {
+                    bot.handleTask(
+                        task = Task.Trainer,
+                        rawText = rawOriginal,
+                        update = update,
+                        message = message,
+                        weightService = weightService,
+                        activityService = activityService,
+                        zoneId = zoneId,
+                    )
+                    return@text
+                }
+                if (jokeQueryPattern.matches(rawOriginal)) {
                     bot.handleTask(
                         task = Task.Trainer,
                         rawText = rawOriginal,

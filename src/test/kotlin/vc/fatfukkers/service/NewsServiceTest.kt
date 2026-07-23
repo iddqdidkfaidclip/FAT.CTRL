@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import vc.fatfukkers.newsQueryPattern
+import vc.fatfukkers.jokeQueryPattern
 import vc.fatfukkers.ukraineNewsQueryPattern
 import vc.fatfukkers.service.NewsRegion
 import java.time.LocalDate
@@ -197,5 +198,21 @@ class UkraineNewsQueryPatternTest {
     fun `does not match unrelated queries`() {
         assertTrue(!ukraineNewsQueryPattern.matches("что там у хохлов про войну"))
         assertTrue(!ukraineNewsQueryPattern.matches("новости"))
+    }
+}
+
+class JokeQueryPatternTest {
+
+    @Test
+    fun `matches joke commands`() {
+        assertTrue(jokeQueryPattern.matches("расскажи анекдот"))
+        assertTrue(jokeQueryPattern.matches("анекдот"))
+        assertTrue(jokeQueryPattern.matches("Анекдотик!"))
+    }
+
+    @Test
+    fun `does not match unrelated joke-like queries`() {
+        assertTrue(!jokeQueryPattern.matches("расскажи анекдот про кота"))
+        assertTrue(!jokeQueryPattern.matches("новости"))
     }
 }
