@@ -15,6 +15,8 @@ import vc.fatfukkers.handleTask
 import vc.fatfukkers.handleTrainerDelete
 import vc.fatfukkers.handleVideoDownload
 import vc.fatfukkers.jokeQueryPattern
+import vc.fatfukkers.newsQueryPattern
+import vc.fatfukkers.ukraineNewsQueryPattern
 import vc.fatfukkers.service.ActivityService
 import vc.fatfukkers.service.ChatParticipantService
 import vc.fatfukkers.service.TrainerMessageRegistry
@@ -51,8 +53,8 @@ private fun commandsHelpText(): String = """
    <i>пример: тренер как начать бегать?</i>
    <i>картинка: покажи ... / тренер покажи ...</i>
    <i>забыть диалог: тренер забудь / тренер забудь всё</i>
-   <i>новости: тренер новости — топ-10 актуальных заголовков (Россия)</i>
-   <i>хохлы: тренер что там у хохлов — топ-10 новостей Украины</i>
+   <i>новости: новости / расскажи новости / тренер новости — топ-10 актуальных заголовков (Россия)</i>
+   <i>хохлы: что там у хохлов / тренер что там у хохлов — топ-10 новостей Украины</i>
    <i>анекдот: расскажи анекдот / тренер расскажи анекдот</i>
    <i>ответь реплаем на сообщение тренера — сработает так же, с учётом контекста</i>
 
@@ -170,6 +172,30 @@ ${commandsHelpText()}
                 }
 
                 if (trainerShowImagePattern.containsMatchIn(rawOriginal)) {
+                    bot.handleTask(
+                        task = Task.Trainer,
+                        rawText = rawOriginal,
+                        update = update,
+                        message = message,
+                        weightService = weightService,
+                        activityService = activityService,
+                        zoneId = zoneId,
+                    )
+                    return@text
+                }
+                if (newsQueryPattern.matches(rawOriginal)) {
+                    bot.handleTask(
+                        task = Task.Trainer,
+                        rawText = rawOriginal,
+                        update = update,
+                        message = message,
+                        weightService = weightService,
+                        activityService = activityService,
+                        zoneId = zoneId,
+                    )
+                    return@text
+                }
+                if (ukraineNewsQueryPattern.matches(rawOriginal)) {
                     bot.handleTask(
                         task = Task.Trainer,
                         rawText = rawOriginal,
