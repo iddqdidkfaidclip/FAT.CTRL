@@ -14,7 +14,7 @@ object EnvConfig {
         if (envFile != null) {
             logger.info("Loaded .env from {}", envFile.toAbsolutePath())
         } else {
-            logger.warn("No .env file found next to jar")
+            logger.warn("No .env file found (jar dir / cwd)")
         }
     }
 
@@ -35,8 +35,9 @@ object EnvConfig {
     }
 
     private fun findEnvFile(): Path? {
-        val path = jarDirEnv() ?: return null
-        return path.takeIf { Files.exists(it) }
+        jarDirEnv()?.takeIf { Files.exists(it) }?.let { return it }
+        Paths.get(".env").toAbsolutePath().normalize().takeIf { Files.exists(it) }?.let { return it }
+        return null
     }
 
     private fun jarDirEnv(): Path? = try {
@@ -49,7 +50,11 @@ object EnvConfig {
 
     fun get(name: String): String? =
         dotEnv[name]?.trim().takeUnless { it.isNullOrBlank() }
+            ?: System.getenv(name)?.trim()?.takeUnless { it.isNullOrBlank() }
 
-    fun getSource(name: String): String? =
-        if (get(name) != null) "file" else null
+    fun getSource(name: String): String? = when {
+        !dotEnv[name].isNullOrBlank() -> "file"
+        !System.getenv(name).isNullOrBlank() -> "env"
+        else -> null
+    }
 }

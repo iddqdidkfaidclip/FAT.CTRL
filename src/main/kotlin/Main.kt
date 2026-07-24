@@ -147,23 +147,21 @@ ${commandsHelpText()}
                     return@text
                 }
 
-                // Временно отключена реакция на ответ пользователя на сообщение тренера.
-                // Когда понадобится — раскомментировать блок ниже.
-                // message.replyToMessage?.let { reply ->
-                //     if (TrainerMessageRegistry.isTrainerMessage(message.chat.id, reply.messageId)) {
-                //         bot.handleTask(
-                //             task = Task.Trainer,
-                //             rawText = rawOriginal,
-                //             update = update,
-                //             message = message,
-                //             weightService = weightService,
-                //             activityService = activityService,
-                //             zoneId = zoneId,
-                //             trainerReplyTo = reply,
-                //         )
-                //         return@text
-                //     }
-                // }
+                message.replyToMessage?.let { reply ->
+                    if (TrainerMessageRegistry.isTrainerMessage(message.chat.id, reply.messageId)) {
+                        bot.handleTask(
+                            task = Task.Trainer,
+                            rawText = rawOriginal,
+                            update = update,
+                            message = message,
+                            weightService = weightService,
+                            activityService = activityService,
+                            zoneId = zoneId,
+                            trainerReplyTo = reply,
+                        )
+                        return@text
+                    }
+                }
 
                 if (trainerShowImagePattern.containsMatchIn(rawOriginal)) {
                     bot.handleTask(

@@ -35,6 +35,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private val taskHandlerLogger = LoggerFactory.getLogger("TaskHandler")
 
+/** Заглушка, если DeepSeek недоступен / ключ не задан / ответ пустой. */
+private const val TRAINER_UNAVAILABLE_STUB =
+    "Прости, котик, я оказалась слишком тупа чтобы разговаривать  \uD83D\uDC94 " +
+        "Могу разве что прокомментировать новости или рассказать что там у хохлов"
+
 private val showImageWorker = Executors.newCachedThreadPool { runnable ->
     Thread(runnable, "show-image-worker").apply { isDaemon = true }
 }
@@ -260,28 +265,19 @@ fun Bot.handleTask(
                 )
                 return
             }
-            // Временно тренер не обращается к нейросети — модель не нашли.
-            // Когда найдётся нормальная модель, раскомментировать блок ниже и убрать заглушку.
-            sendTrainerMessage(
-                chatId = chatId,
-                text = "Прости, котик, я оказалась слишком тупа чтобы разговаривать  \uD83D\uDC94 " +
-                    "Могу разве что прокомментировать новости или рассказать что там у хохлов",
-                replyToMessageId = message.messageId,
-            )
-            // val replyToMessageId = message.messageId
-            // val telegramUserId = u.telegramId
-            // TrainerQueue.submit(telegramUserId) {
-            //     val answer = askTrainerWithTyping(chatId, telegramUserId, query)
-            //     val text = answer?.takeIf { it.isNotBlank() }
-            //         ?: "Я сейчас недоступна 💔 (скорее всего виноват Макс)"
-            //     if (!sendTrainerAnswer(chatId, text, replyToMessageId, query)) {
-            //         sendTrainerMessage(
-            //             chatId = chatId,
-            //             text = "не смогла отправить ответ тренера",
-            //             allowSendingWithoutReply = true,
-            //         )
-            //     }
-            // }
+            val replyToMessageId = message.messageId
+            val telegramUserId = u.telegramId
+            TrainerQueue.submit(telegramUserId) {
+                val answer = askTrainerWithTyping(chatId, telegramUserId, query)
+                val text = answer?.takeIf { it.isNotBlank() } ?: TRAINER_UNAVAILABLE_STUB
+                if (!sendTrainerAnswer(chatId, text, replyToMessageId, query)) {
+                    sendTrainerMessage(
+                        chatId = chatId,
+                        text = "не смогла отправить ответ тренера",
+                        allowSendingWithoutReply = true,
+                    )
+                }
+            }
         }
     }
 }
