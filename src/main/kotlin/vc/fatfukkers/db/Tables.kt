@@ -50,3 +50,15 @@ object DailyAssignments : LongIdTable("daily_assignments") {
     }
 }
 
+/** Активные участники чата — для упоминаний и контекста в ответах тренера. */
+object ChatParticipants : Table("chat_participants") {
+    val chatId = long("chat_id")
+    val telegramUserId = long("telegram_user_id")
+    val nickname = varchar("nickname", 128)
+    /** Последние сообщения участника, по одному в строке (макс. 20). */
+    val recentMessages = text("recent_messages").default("")
+    val createdAtEpochMs = long("created_at_epoch_ms")
+
+    override val primaryKey = PrimaryKey(chatId, telegramUserId, name = "pk_chat_participants")
+}
+

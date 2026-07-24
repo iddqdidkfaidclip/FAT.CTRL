@@ -19,6 +19,7 @@ import vc.fatfukkers.service.NewsService
 import vc.fatfukkers.service.TelegramAnimationSender
 import vc.fatfukkers.service.TrainerMessageRegistry
 import vc.fatfukkers.service.TrainerQueue
+import vc.fatfukkers.service.ChatParticipantService
 import vc.fatfukkers.service.TrainerService
 import vc.fatfukkers.service.UserService
 import vc.fatfukkers.service.WeightChartService
@@ -102,6 +103,7 @@ fun Bot.handleTask(
 ) {
     val u = UserService.upsertFromUpdate(update)
     val chatId = ChatId.fromId(message.chat.id)
+    ChatParticipantService.rememberFromUser(message.chat.id, u)
     val current = weightService.getLastWeight(u.telegramId)
     val goalBefore = UserService.getGoalWeight(u.telegramId)
 
@@ -267,8 +269,9 @@ fun Bot.handleTask(
             }
             val replyToMessageId = message.messageId
             val telegramUserId = u.telegramId
+            val chatIdLong = message.chat.id
             TrainerQueue.submit(telegramUserId) {
-                val answer = askTrainerWithTyping(chatId, telegramUserId, query)
+                val answer = askTrainerWithTyping(chatId, telegramUserId, query, chatIdLong)
                 val text = answer?.takeIf { it.isNotBlank() } ?: TRAINER_UNAVAILABLE_STUB
                 if (!sendTrainerAnswer(chatId, text, replyToMessageId, query)) {
                     sendTrainerMessage(
@@ -583,6 +586,7 @@ private fun Bot.askTrainerWithTyping(
     chatId: ChatId,
     telegramUserId: Long,
     query: String,
+    chatIdLong: Long,
 ): String? {
     val stopTyping = AtomicBoolean(false)
     val typingThread = Thread(
@@ -601,7 +605,7 @@ private fun Bot.askTrainerWithTyping(
     }
 
     return try {
-        TrainerService.ask(telegramUserId, query)
+        TrainerService.ask(telegramUserId, query, chatId = chatIdLong)
     } catch (_: Exception) {
         null
     } finally {

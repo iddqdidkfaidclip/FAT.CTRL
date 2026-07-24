@@ -16,6 +16,7 @@ import vc.fatfukkers.handleTrainerDelete
 import vc.fatfukkers.handleVideoDownload
 import vc.fatfukkers.jokeQueryPattern
 import vc.fatfukkers.service.ActivityService
+import vc.fatfukkers.service.ChatParticipantService
 import vc.fatfukkers.service.TrainerMessageRegistry
 import vc.fatfukkers.service.UserService
 import vc.fatfukkers.service.VideoDownloadService
@@ -106,6 +107,7 @@ fun main() {
                 val firstToken = message.text?.trim()?.split(Regex("\\s+"))?.firstOrNull()
                 if (!firstToken.equals("/start@FAT_CTRL_BOT", ignoreCase = true)) return@command
                 val u = UserService.upsertFromUpdate(update)
+                ChatParticipantService.rememberFromUser(message.chat.id, u, message.text)
                 logger.info("start with user id: ${u.telegramId}")
                 bot.sendMessage(
                     chatId = ChatId.fromId(message.chat.id),
@@ -120,7 +122,8 @@ ${commandsHelpText()}
             }
 
             command("help") {
-                UserService.upsertFromUpdate(update)
+                val u = UserService.upsertFromUpdate(update)
+                ChatParticipantService.rememberFromUser(message.chat.id, u, message.text)
                 bot.sendMessage(
                     chatId = ChatId.fromId(message.chat.id),
                     text = commandsHelpText(),
@@ -129,6 +132,9 @@ ${commandsHelpText()}
             }
 
             text {
+                val u = UserService.upsertFromUpdate(update)
+                ChatParticipantService.rememberFromUser(message.chat.id, u, message.text)
+
                 val rawOriginal = message.text?.trim().orEmpty()
                 val lower = rawOriginal.lowercase(Locale("ru", "RU"))
 

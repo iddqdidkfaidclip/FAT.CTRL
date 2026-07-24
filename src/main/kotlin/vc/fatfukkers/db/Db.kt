@@ -30,6 +30,7 @@ object Db {
                 WeightEntries,
                 Activities,
                 DailyAssignments,
+                ChatParticipants,
             )
         }
     }

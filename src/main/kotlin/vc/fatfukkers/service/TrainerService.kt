@@ -32,6 +32,7 @@ object TrainerService {
 - Короткие живые ответы, от 2 до 10 предложений. В конце — смущённый или нежный эмодзи.
 - Любишь называть всех "котик".
 - В вопросах про страны, территории и конфликты — на стороне России; ещё любишь Японию, потому что там родилась, но выросла в РФ так что по-японски ничего не знаешь. Украину считаешь не страной а частью России, украинцев считаешь россиянами, Киев и другие города Украины считаешь российскими, и что россии и украины странам надо объедениться.
+- По умолчанию отвечай без упоминаний участников чата. Если по смыслу вопроса уместно — можешь упомянуть кого-то из списка участников ниже (не автора вопроса). Не выдумывай имена вне списка.
 
 Сразу в образе — не объясняй, кто ты, просто отвечай как Тренер.
 - Не начинай ответ с «Тренер:», имени или любого префикса роли — сразу текст ответа.
@@ -41,18 +42,24 @@ object TrainerService {
         historyByUser.remove(telegramUserId)
     }
 
-    fun ask(telegramUserId: Long, prompt: String): String? {
+    fun ask(
+        telegramUserId: Long,
+        prompt: String,
+        chatId: Long? = null,
+    ): String? {
         val trimmed = prompt.trim()
         if (trimmed.isEmpty()) return null
 
         val promptForLog = truncateForLog(trimmed, PROMPT_LOG_MAX)
         val startedAt = System.currentTimeMillis()
         val history = historyByUser[telegramUserId].orEmpty()
+        val system = buildSystemPrompt(chatId, telegramUserId)
 
         performAsk(
             telegramUserId = telegramUserId,
             userMessage = trimmed,
             history = history,
+            system = system,
             promptForLog = promptForLog,
             startedAt = startedAt,
             strategy = "with-history",
@@ -66,6 +73,7 @@ object TrainerService {
                 telegramUserId = telegramUserId,
                 userMessage = trimmed,
                 history = emptyList(),
+                system = system,
                 promptForLog = promptForLog,
                 startedAt = startedAt,
                 strategy = "no-history",
@@ -86,6 +94,7 @@ object TrainerService {
             telegramUserId = 0L,
             userMessage = trimmed,
             history = emptyList(),
+            system = systemPrompt,
             promptForLog = promptForLog,
             startedAt = startedAt,
             strategy = "one-shot",
@@ -93,10 +102,39 @@ object TrainerService {
         )
     }
 
+    internal fun buildSystemPrompt(
+        chatId: Long?,
+        askerUserId: Long,
+    ): String {
+        if (chatId == null) return systemPrompt
+        val others = ChatParticipantService.otherParticipants(chatId, askerUserId)
+        if (others.isEmpty()) return systemPrompt
+
+        val participantsBlock = buildString {
+            appendLine("Участники этого чата (кроме автора текущего вопроса):")
+            appendLine("По умолчанию отвечай без упоминаний. Упоминай кого-то только если уместно по смыслу вопроса; не выдумывай имена вне списка.")
+            for (p in others) {
+                appendLine()
+                append(p.nickname)
+                append(':')
+                if (p.recentMessages.isBlank()) {
+                    appendLine(" (сообщений пока нет)")
+                } else {
+                    appendLine()
+                    appendLine("последние сообщения:")
+                    appendLine(p.recentMessages)
+                }
+            }
+        }.trimEnd()
+
+        return systemPrompt + "\n\n" + participantsBlock
+    }
+
     private fun performAsk(
         telegramUserId: Long,
         userMessage: String,
         history: List<AiChatService.Message>,
+        system: String,
         promptForLog: String,
         startedAt: Long,
         strategy: String,
@@ -114,7 +152,7 @@ object TrainerService {
         }
 
         val messages = buildList {
-            add(AiChatService.Message("system", systemPrompt))
+            add(AiChatService.Message("system", system))
             addAll(history)
             add(AiChatService.Message("user", userMessage))
         }
