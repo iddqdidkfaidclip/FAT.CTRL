@@ -53,6 +53,9 @@ object VideoDownloadService {
     data class MediaItem(
         val file: Path,
         val mediaKind: MediaKind,
+        val width: Int? = null,
+        val height: Int? = null,
+        val durationSec: Int? = null,
     )
 
     data class DownloadResult(
@@ -229,7 +232,7 @@ object VideoDownloadService {
             DownloadOutcome.Ok(
                 DownloadResult(
                     title = title,
-                    items = listOf(MediaItem(file, mediaKind)),
+                    items = listOf(prepareMediaItem(file, mediaKind, forceNormalize = false)),
                 ),
             )
         } catch (e: Exception) {
@@ -237,6 +240,24 @@ object VideoDownloadService {
             logger.warn("Downloaded file validation failed for {}", file, e)
             null
         }
+    }
+
+    private fun prepareMediaItem(
+        file: Path,
+        mediaKind: MediaKind,
+        forceNormalize: Boolean,
+    ): MediaItem {
+        if (mediaKind != MediaKind.VIDEO) {
+            return MediaItem(file = file, mediaKind = mediaKind)
+        }
+        val prepared = VideoTelegramPrep.prepareForTelegram(file, forceNormalize = forceNormalize)
+        return MediaItem(
+            file = prepared.file,
+            mediaKind = mediaKind,
+            width = prepared.info?.width,
+            height = prepared.info?.height,
+            durationSec = prepared.info?.durationSec,
+        )
     }
 
     private fun downloadVideo(
@@ -306,7 +327,7 @@ object VideoDownloadService {
                 InstagramImageService.ItemKind.VIDEO -> MediaKind.VIDEO
                 InstagramImageService.ItemKind.PHOTO -> MediaKind.PHOTO
             }
-            items += MediaItem(item.path, mediaKind)
+            items += prepareMediaItem(item.path, mediaKind, forceNormalize = mediaKind == MediaKind.VIDEO)
         }
 
         return DownloadOutcome.Ok(DownloadResult(title = title, items = items))
@@ -356,7 +377,7 @@ object VideoDownloadService {
                 }
 
                 val mediaKind = if (isPhoto) MediaKind.PHOTO else MediaKind.VIDEO
-                items += MediaItem(target, mediaKind)
+                items += prepareMediaItem(target, mediaKind, forceNormalize = mediaKind == MediaKind.VIDEO)
             }
             deleteDirectoryQuietly(outDir)
 
@@ -548,7 +569,13 @@ object VideoDownloadService {
                 mediaKind,
                 url
             )
-            DownloadOutcome.Ok(DownloadResult(title = title, items = listOf(MediaItem(file, mediaKind))))
+            val forceNormalize = isInstagram(url) && mediaKind == MediaKind.VIDEO
+            DownloadOutcome.Ok(
+                DownloadResult(
+                    title = title,
+                    items = listOf(prepareMediaItem(file, mediaKind, forceNormalize = forceNormalize)),
+                ),
+            )
         } catch (e: ProcessTimeoutException) {
             cleanupFiles(id)
             DownloadOutcome.Err(downloadFail("скачивание слишком долгое, попробуй короче ролик", pingAdmin = false))

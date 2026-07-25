@@ -130,6 +130,10 @@ private fun Bot.sendDownloadedMedia(
                 VideoDownloadService.MediaKind.VIDEO -> InputMediaVideo(
                     media = telegramFile,
                     caption = itemCaption,
+                    width = item.width,
+                    height = item.height,
+                    duration = item.durationSec,
+                    supportsStreaming = true,
                 )
                 VideoDownloadService.MediaKind.AUDIO ->
                     throw IllegalStateException("audio not supported in media group")
@@ -190,6 +194,9 @@ private fun Bot.sendSingleItem(
         VideoDownloadService.MediaKind.VIDEO -> sendVideo(
             chatId = chatId,
             video = TelegramFile.ByFile(file),
+            duration = item.durationSec,
+            width = item.width,
+            height = item.height,
             caption = caption,
             replyParameters = replyTo(replyToMessageId),
         )
