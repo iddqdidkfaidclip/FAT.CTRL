@@ -72,6 +72,8 @@ private fun commandsHelpText(): String = """
 😬 <b>жирная жиробасина</b> — осталось больше 20% от веса
 
 <i>Установи цель командой «цель XX» — и звание начнёт считаться!</i>
+
+<i>версия ${BotVersion.VERSION}</i>
 """.trimIndent()
 
 private fun initTrainerLogPath() {
@@ -280,5 +282,14 @@ ${commandsHelpText()}
         }
     }
 
+    logger.info("FATCTRLBOT v{} starting", BotVersion.VERSION)
+    bot.setMyDescription(description = BotVersion.description()).fold(
+        ifSuccess = { logger.info("Bot description updated to v{}", BotVersion.VERSION) },
+        ifError = { logger.warn("Failed to set bot description: {}", it) },
+    )
+    bot.setMyShortDescription(shortDescription = BotVersion.shortDescription()).fold(
+        ifSuccess = { logger.info("Bot short description updated to v{}", BotVersion.VERSION) },
+        ifError = { logger.warn("Failed to set bot short description: {}", it) },
+    )
     bot.startPolling()
 }

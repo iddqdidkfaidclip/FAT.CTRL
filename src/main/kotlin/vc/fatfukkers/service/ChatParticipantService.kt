@@ -16,6 +16,9 @@ data class ChatParticipantSnapshot(
 )
 
 object ChatParticipantService {
+    /** Служебный id для сообщений самой Тренер в чате. */
+    internal const val TRAINER_TELEGRAM_USER_ID = 0L
+    private const val TRAINER_NICKNAME = "Тренер"
     private const val MAX_RECENT_MESSAGES = 20
     private const val MAX_MESSAGE_CHARS = 300
 
@@ -57,6 +60,25 @@ object ChatParticipantService {
         appendMessage(chatId, user.telegramId, text)
     }
 
+    /** Сохраняет ответ Тренер в контексте чата (последние [MAX_RECENT_MESSAGES]). */
+    fun rememberTrainerReply(chatId: Long, messageText: String) {
+        remember(chatId, TRAINER_TELEGRAM_USER_ID, TRAINER_NICKNAME)
+        appendMessage(chatId, TRAINER_TELEGRAM_USER_ID, stripHtml(messageText))
+    }
+
+    fun trainerRecentMessages(chatId: Long): String =
+        transaction {
+            ChatParticipants
+                .selectAll()
+                .where {
+                    (ChatParticipants.chatId eq chatId) and
+                        (ChatParticipants.telegramUserId eq TRAINER_TELEGRAM_USER_ID)
+                }
+                .firstOrNull()
+                ?.get(ChatParticipants.recentMessages)
+                .orEmpty()
+        }
+
     fun appendMessage(chatId: Long, telegramUserId: Long, messageText: String) {
         val line = normalizeMessage(messageText) ?: return
 
@@ -80,14 +102,15 @@ object ChatParticipantService {
         }
     }
 
-    /** Другие участники чата с их недавним контекстом (не автор текущего сообщения). */
+    /** Другие участники чата с их недавним контекстом (не автор и не сама Тренер). */
     fun otherParticipants(chatId: Long, excludeUserId: Long): List<ChatParticipantSnapshot> =
         transaction {
             ChatParticipants
                 .selectAll()
                 .where {
                     (ChatParticipants.chatId eq chatId) and
-                        (ChatParticipants.telegramUserId neq excludeUserId)
+                        (ChatParticipants.telegramUserId neq excludeUserId) and
+                        (ChatParticipants.telegramUserId neq TRAINER_TELEGRAM_USER_ID)
                 }
                 .map {
                     ChatParticipantSnapshot(
@@ -112,4 +135,7 @@ object ChatParticipantService {
 
     internal fun parseMessages(stored: String): List<String> =
         stored.lines().map { it.trim() }.filter { it.isNotEmpty() }
+
+    private fun stripHtml(text: String): String =
+        text.replace(Regex("<[^>]+>"), " ")
 }

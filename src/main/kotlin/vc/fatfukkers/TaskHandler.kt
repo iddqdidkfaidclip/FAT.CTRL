@@ -475,11 +475,15 @@ private fun Bot.sendTrainerMessage(
         parseMode = parseMode,
         replyParameters = replyTo(replyToMessageId, allowSendingWithoutReply),
     )
-    result.fold(
-        ifSuccess = { TrainerMessageRegistry.register(chatIdLong, it.messageId) },
-        ifError = {},
-    )
-    return result.telegramMessageSucceeded("sendMessage")
+    val ok = result.telegramMessageSucceeded("sendMessage")
+    if (ok) {
+        result.fold(
+            ifSuccess = { TrainerMessageRegistry.register(chatIdLong, it.messageId) },
+            ifError = {},
+        )
+        ChatParticipantService.rememberTrainerReply(chatIdLong, text)
+    }
+    return ok
 }
 
 private fun Bot.sendTrainerAnswer(
@@ -520,6 +524,7 @@ private fun Bot.sendTrainerAnswer(
                 ifSuccess = { TrainerMessageRegistry.register(chatIdLong, it.messageId) },
                 ifError = {},
             )
+            ChatParticipantService.rememberTrainerReply(chatIdLong, text)
             return true
         }
     }

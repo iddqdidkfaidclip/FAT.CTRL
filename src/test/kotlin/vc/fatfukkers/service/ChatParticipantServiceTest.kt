@@ -105,4 +105,27 @@ class ChatParticipantServiceTest {
         val alone = TrainerService.buildSystemPrompt(chatId = -200L, askerUserId = 10L)
         assertFalse(alone.contains("Участники этого чата"))
     }
+
+    @Test
+    fun `rememberTrainerReply keeps last 20 and goes into prompt`() {
+        ChatParticipantService.rememberTrainerReply(-100L, "привет, котик")
+        repeat(25) { i ->
+            ChatParticipantService.rememberTrainerReply(-100L, "ответ$i")
+        }
+
+        val stored = ChatParticipantService.trainerRecentMessages(-100L).lines()
+        assertEquals(20, stored.size)
+        assertEquals("ответ5", stored.first())
+        assertEquals("ответ24", stored.last())
+        assertFalse(ChatParticipantService.trainerRecentMessages(-100L).contains("привет"))
+
+        // Тренер не попадает в список участников для упоминаний
+        assertTrue(
+            ChatParticipantService.otherParticipants(-100L, excludeUserId = 1L).isEmpty(),
+        )
+
+        val prompt = TrainerService.buildSystemPrompt(chatId = -100L, askerUserId = 1L)
+        assertTrue(prompt.contains("Твои предыдущие ответы"), prompt)
+        assertTrue(prompt.contains("ответ24"), prompt)
+    }
 }
