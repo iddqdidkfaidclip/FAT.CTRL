@@ -327,7 +327,7 @@ object VideoDownloadService {
                 InstagramImageService.ItemKind.VIDEO -> MediaKind.VIDEO
                 InstagramImageService.ItemKind.PHOTO -> MediaKind.PHOTO
             }
-            items += prepareMediaItem(item.path, mediaKind, forceNormalize = mediaKind == MediaKind.VIDEO)
+            items += prepareMediaItem(item.path, mediaKind, forceNormalize = false)
         }
 
         return DownloadOutcome.Ok(DownloadResult(title = title, items = items))
@@ -377,7 +377,7 @@ object VideoDownloadService {
                 }
 
                 val mediaKind = if (isPhoto) MediaKind.PHOTO else MediaKind.VIDEO
-                items += prepareMediaItem(target, mediaKind, forceNormalize = mediaKind == MediaKind.VIDEO)
+                items += prepareMediaItem(target, mediaKind, forceNormalize = false)
             }
             deleteDirectoryQuietly(outDir)
 
@@ -569,11 +569,10 @@ object VideoDownloadService {
                 mediaKind,
                 url
             )
-            val forceNormalize = isInstagram(url) && mediaKind == MediaKind.VIDEO
             DownloadOutcome.Ok(
                 DownloadResult(
                     title = title,
-                    items = listOf(prepareMediaItem(file, mediaKind, forceNormalize = forceNormalize)),
+                    items = listOf(prepareMediaItem(file, mediaKind, forceNormalize = false)),
                 ),
             )
         } catch (e: ProcessTimeoutException) {
