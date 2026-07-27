@@ -20,7 +20,7 @@ object ChatParticipantService {
     internal const val TRAINER_TELEGRAM_USER_ID = 0L
     private const val TRAINER_NICKNAME = "Тренер"
     private const val MAX_RECENT_MESSAGES = 20
-    private const val MAX_MESSAGE_CHARS = 300
+    private const val MAX_MESSAGE_CHARS = 280
 
     fun displayNickname(username: String?, firstName: String?): String? {
         username?.trim()?.takeIf { it.isNotEmpty() }?.let { return "@$it" }
@@ -102,15 +102,49 @@ object ChatParticipantService {
         }
     }
 
-    /** Другие участники чата с их недавним контекстом (не автор и не сама Тренер). */
+    /** Очищает сохранённые сообщения участника в чате. */
+    fun clearRecentMessages(chatId: Long, telegramUserId: Long) {
+        transaction {
+            ChatParticipants.update({
+                (ChatParticipants.chatId eq chatId) and
+                    (ChatParticipants.telegramUserId eq telegramUserId)
+            }) {
+                it[ChatParticipants.recentMessages] = ""
+            }
+        }
+    }
+
+    /** Очищает сохранённые сообщения всех участников чата (включая Тренер). */
+    fun clearAllRecentMessages(chatId: Long) {
+        transaction {
+            ChatParticipants.update({ ChatParticipants.chatId eq chatId }) {
+                it[ChatParticipants.recentMessages] = ""
+            }
+        }
+    }
+
+    /** Все участники чата с их недавним контекстом (кроме самой Тренер). */
+    fun participantsInChat(chatId: Long): List<ChatParticipantSnapshot> =
+        loadParticipants(chatId, excludeUserId = null)
+
+    /** Другие участники чата (не автор и не сама Тренер). */
     fun otherParticipants(chatId: Long, excludeUserId: Long): List<ChatParticipantSnapshot> =
+        loadParticipants(chatId, excludeUserId = excludeUserId)
+
+    private fun loadParticipants(
+        chatId: Long,
+        excludeUserId: Long?,
+    ): List<ChatParticipantSnapshot> =
         transaction {
             ChatParticipants
                 .selectAll()
                 .where {
-                    (ChatParticipants.chatId eq chatId) and
-                        (ChatParticipants.telegramUserId neq excludeUserId) and
+                    var cond = (ChatParticipants.chatId eq chatId) and
                         (ChatParticipants.telegramUserId neq TRAINER_TELEGRAM_USER_ID)
+                    if (excludeUserId != null) {
+                        cond = cond and (ChatParticipants.telegramUserId neq excludeUserId)
+                    }
+                    cond
                 }
                 .map {
                     ChatParticipantSnapshot(

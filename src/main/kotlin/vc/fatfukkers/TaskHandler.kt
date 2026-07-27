@@ -220,8 +220,17 @@ fun Bot.handleTask(
                 return
             }
             val forgetQuery = query.lowercase(java.util.Locale("ru", "RU"))
+            if (forgetQuery == "забудь вообще всё" || forgetQuery == "забудь вообще все") {
+                TrainerService.resetAllContext(message.chat.id)
+                sendTrainerMessage(
+                    chatId = chatId,
+                    text = "тренер забыла вообще всё в этом чате — чистый лист",
+                    replyToMessageId = message.messageId
+                )
+                return
+            }
             if (forgetQuery == "забудь" || forgetQuery == "забудь всё" || forgetQuery == "забудь все") {
-                TrainerService.resetContext(u.telegramId)
+                TrainerService.resetContext(message.chat.id, u.telegramId)
                 sendTrainerMessage(
                     chatId = chatId,
                     text = "тренер забыла прошлый разговор — начинаем с чистого листа",

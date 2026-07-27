@@ -86,15 +86,31 @@ class ChatParticipantServiceTest {
     }
 
     @Test
-    fun `buildSystemPrompt includes per-participant message context`() {
+    fun `normalizeMessage truncates to 280 chars`() {
+        val long = "а".repeat(400)
+        val normalized = ChatParticipantService.normalizeMessage(long)!!
+        assertEquals(280, normalized.length)
+
+        val user = BotUser(telegramId = 2L, username = "bob", firstName = "Bob", lastName = null)
+        ChatParticipantService.rememberFromUser(-100L, user, long)
+        val stored = ChatParticipantService.participantsInChat(-100L).single().recentMessages
+        assertEquals(280, stored.length)
+    }
+
+    @Test
+    fun `buildSystemPrompt includes all participants including asker`() {
+        val asker = BotUser(1L, "alice", "Alice", null)
         val bob = BotUser(2L, "bob", "Bob", null)
         val carol = BotUser(3L, "carol", "Carol", null)
+        ChatParticipantService.rememberFromUser(-100L, asker, "алиса спрашивает про бег")
         ChatParticipantService.rememberFromUser(-100L, bob, "боб любит бег")
         ChatParticipantService.rememberFromUser(-100L, bob, "боб ест курицу")
         ChatParticipantService.rememberFromUser(-100L, carol, "кэрол на диете")
 
-        val withList = TrainerService.buildSystemPrompt(chatId = -100L, askerUserId = 1L)
+        val withList = TrainerService.buildSystemPrompt(chatId = -100L)
         assertTrue(withList.contains("Участники этого чата"), withList)
+        assertTrue(withList.contains("@alice"), withList)
+        assertTrue(withList.contains("алиса спрашивает про бег"), withList)
         assertTrue(withList.contains("@bob"), withList)
         assertTrue(withList.contains("боб любит бег"), withList)
         assertTrue(withList.contains("боб ест курицу"), withList)
@@ -102,8 +118,44 @@ class ChatParticipantServiceTest {
         assertTrue(withList.contains("кэрол на диете"), withList)
 
         ChatParticipantService.remember(-200L, 10L, "@alone")
-        val alone = TrainerService.buildSystemPrompt(chatId = -200L, askerUserId = 10L)
+        val alone = TrainerService.buildSystemPrompt(chatId = -200L)
         assertFalse(alone.contains("Участники этого чата"))
+
+        ChatParticipantService.rememberFromUser(-300L, BotUser(10L, "solo", "Solo", null), "я одна в чате")
+        val aloneWithMsgs = TrainerService.buildSystemPrompt(chatId = -300L)
+        assertTrue(aloneWithMsgs.contains("@solo"), aloneWithMsgs)
+        assertTrue(aloneWithMsgs.contains("я одна в чате"), aloneWithMsgs)
+    }
+
+    @Test
+    fun `resetContext clears asker and trainer messages in chat`() {
+        val asker = BotUser(1L, "alice", "Alice", null)
+        val bob = BotUser(2L, "bob", "Bob", null)
+        ChatParticipantService.rememberFromUser(-100L, asker, "вопрос алисы")
+        ChatParticipantService.rememberFromUser(-100L, bob, "реплика боба")
+        ChatParticipantService.rememberTrainerReply(-100L, "ответ тренера")
+
+        TrainerService.resetContext(-100L, asker.telegramId)
+
+        val participants = ChatParticipantService.participantsInChat(-100L)
+        assertEquals("", participants.first { it.nickname == "@alice" }.recentMessages)
+        assertEquals("реплика боба", participants.first { it.nickname == "@bob" }.recentMessages)
+        assertEquals("", ChatParticipantService.trainerRecentMessages(-100L))
+    }
+
+    @Test
+    fun `resetAllContext clears every participant in chat`() {
+        val asker = BotUser(1L, "alice", "Alice", null)
+        val bob = BotUser(2L, "bob", "Bob", null)
+        ChatParticipantService.rememberFromUser(-100L, asker, "вопрос алисы")
+        ChatParticipantService.rememberFromUser(-100L, bob, "реплика боба")
+        ChatParticipantService.rememberTrainerReply(-100L, "ответ тренера")
+
+        TrainerService.resetAllContext(-100L)
+
+        val participants = ChatParticipantService.participantsInChat(-100L)
+        assertTrue(participants.all { it.recentMessages.isEmpty() })
+        assertEquals("", ChatParticipantService.trainerRecentMessages(-100L))
     }
 
     @Test
@@ -124,7 +176,7 @@ class ChatParticipantServiceTest {
             ChatParticipantService.otherParticipants(-100L, excludeUserId = 1L).isEmpty(),
         )
 
-        val prompt = TrainerService.buildSystemPrompt(chatId = -100L, askerUserId = 1L)
+        val prompt = TrainerService.buildSystemPrompt(chatId = -100L)
         assertTrue(prompt.contains("Твои предыдущие ответы"), prompt)
         assertTrue(prompt.contains("ответ24"), prompt)
     }

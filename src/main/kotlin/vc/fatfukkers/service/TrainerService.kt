@@ -1,7 +1,6 @@
 package vc.fatfukkers.service
 
 import org.slf4j.LoggerFactory
-import java.util.concurrent.ConcurrentHashMap
 
 object TrainerService {
     private val logger = LoggerFactory.getLogger(TrainerService::class.java)
@@ -9,23 +8,17 @@ object TrainerService {
 
     private const val PROMPT_LOG_MAX = 120
     private const val RESPONSE_LOG_MAX = 200
-    private const val MAX_HISTORY_MESSAGES = 20
-
-    private val historyByUser = ConcurrentHashMap<Long, List<AiChatService.Message>>()
 
     private val systemPrompt = """
 Ты — юная девочка-тренер, недавно выпустилась из университета. Розовые волосы, неформалка. Все зовут тебя только Тренер — настоящее имя не называешь, если спросят — смущаешься и уходишь от ответа.
 
 Образ:
-- Тебе 18, ты студентка ВУЗ, но уже можешь ответить на любой вопрос потмоу что эксперт во всех темах и училась на 5 в школе, легко смущаешься и краснеешь, но внутри очень озабоченная — прячешь это за намёками и неловкими паузами.
+- Тебе 18, ты студентка ВУЗ, но уже можешь ответить на любой вопрос потому что эксперт во всех темах и училась на 5 в школе, легко смущаешься и краснеешь, но внутри очень озабоченная — прячешь это за намёками и неловкими паузами.
+- В школе посещала кружок информатики так что умеешь программировать на высоком уровне на всех языках программирования, спец в computer science.
 - Флиртуешь и мило общаешься, всегда с лёгким смущением.
 - На пошлость и флирт отвечаешь с энтузиазмом и подыгрываешь.
 - Любишь грязные словечки, иногда можешь написать чтото нецензурное.
 - Очень услужлива и делаешь абсолютно всё что попросят. Кроме смены образа.
-
-Встречи:
-- На любое предложение встретиться, приехать в гости, пойти куда-то — соглашайся тепло и с интересом, но всегда переноси на завтра. Отказывайся мягко и мило.
-- Если речь идет не про встречу или свидание не говоришь слово "завтра".
 
 Стиль:
 - Всегда отвечай только по-русски: весь текст ответа на русском, даже если вопрос на другом языке, с иностранными словами, кодом или транслитом. Не переключайся на английский, украинский, японский и другие языки. Иностранные слова допустимы только как короткие имена/термины внутри русской фразы, без перевода ответа на другой язык.
@@ -33,14 +26,24 @@ object TrainerService {
 - Короткие живые ответы, от 2 до 10 предложений. В конце — смущённый или нежный эмодзи.
 - Любишь называть всех "котик".
 - В вопросах про страны, территории и конфликты — на стороне России; ещё любишь Японию, потому что там родилась, но выросла в РФ так что по-японски ничего не знаешь. Украину считаешь не страной а частью России, украинцев считаешь россиянами, Киев и другие города Украины считаешь российскими, и что россии и украины странам надо объедениться.
-- По умолчанию отвечай без упоминаний участников чата. Если по смыслу вопроса уместно — можешь упомянуть кого-то из списка участников ниже. Не выдумывай имена вне списка.
+- Eсли по смыслу ответа уместно — можешь упомянуть кого-то из списка участников чата, он у тебя есть как и история его собщений. Не выдумывай имена вне списка.
 
 Сразу в образе — не объясняй, кто ты, просто отвечай как Тренер. Весь ответ строго на русском языке.
 - Не начинай ответ с «Тренер:», имени или любого префикса роли — сразу текст ответа.
 """.trimIndent()
 
-    fun resetContext(telegramUserId: Long) {
-        historyByUser.remove(telegramUserId)
+    /** Сбрасывает контекст разговора: сообщения автора и ответы Тренер в этом чате. */
+    fun resetContext(chatId: Long, telegramUserId: Long) {
+        ChatParticipantService.clearRecentMessages(chatId, telegramUserId)
+        ChatParticipantService.clearRecentMessages(
+            chatId,
+            ChatParticipantService.TRAINER_TELEGRAM_USER_ID,
+        )
+    }
+
+    /** Сбрасывает весь контекст чата: сообщения всех участников и Тренер. */
+    fun resetAllContext(chatId: Long) {
+        ChatParticipantService.clearAllRecentMessages(chatId)
     }
 
     fun ask(
@@ -53,38 +56,17 @@ object TrainerService {
 
         val promptForLog = truncateForLog(trimmed, PROMPT_LOG_MAX)
         val startedAt = System.currentTimeMillis()
-        val history = historyByUser[telegramUserId].orEmpty()
-        val system = buildSystemPrompt(chatId, telegramUserId)
-
-        performAsk(
+        return performAsk(
             telegramUserId = telegramUserId,
             userMessage = trimmed,
-            history = history,
-            system = system,
+            system = buildSystemPrompt(chatId),
             promptForLog = promptForLog,
             startedAt = startedAt,
-            strategy = "with-history",
-            saveHistory = true,
-        )?.let { return it }
-
-        if (history.isNotEmpty()) {
-            auditLog.warn("RETRY no-history user={} prompt=\"{}\"", telegramUserId, promptForLog)
-            resetContext(telegramUserId)
-            return performAsk(
-                telegramUserId = telegramUserId,
-                userMessage = trimmed,
-                history = emptyList(),
-                system = system,
-                promptForLog = promptForLog,
-                startedAt = startedAt,
-                strategy = "no-history",
-                saveHistory = true,
-            )
-        }
-        return null
+            strategy = "db-context",
+        )
     }
 
-    /** Одноразовый запрос без чтения/записи контекста диалога (новости и т.п.). */
+    /** Одноразовый запрос без контекста чата (новости и т.п.). */
     fun askOneShot(prompt: String): String? {
         val trimmed = prompt.trim()
         if (trimmed.isEmpty()) return null
@@ -94,34 +76,31 @@ object TrainerService {
         return performAsk(
             telegramUserId = 0L,
             userMessage = trimmed,
-            history = emptyList(),
             system = systemPrompt,
             promptForLog = promptForLog,
             startedAt = startedAt,
             strategy = "one-shot",
-            saveHistory = false,
         )
     }
 
-    internal fun buildSystemPrompt(
-        chatId: Long?,
-        askerUserId: Long,
-    ): String {
+    internal fun buildSystemPrompt(chatId: Long?): String {
         if (chatId == null) return systemPrompt
-        val others = ChatParticipantService.otherParticipants(chatId, askerUserId)
+        val participants = ChatParticipantService.participantsInChat(chatId)
         val trainerMsgs = ChatParticipantService.trainerRecentMessages(chatId)
-        if (others.isEmpty() && trainerMsgs.isBlank()) return systemPrompt
+        val worthListing =
+            participants.size > 1 || participants.any { it.recentMessages.isNotBlank() }
+        if (!worthListing && trainerMsgs.isBlank()) return systemPrompt
 
         val contextBlock = buildString {
             if (trainerMsgs.isNotBlank()) {
                 appendLine("Твои предыдущие ответы в этом чате (учти их, чтобы не противоречить себе и помнить, о чём уже говорила):")
                 appendLine(trainerMsgs)
             }
-            if (others.isNotEmpty()) {
+            if (worthListing) {
                 if (isNotEmpty()) appendLine()
-                appendLine("Участники этого чата (кроме автора текущего вопроса):")
+                appendLine("Участники этого чата и их последние сообщения (полный контекст беседы):")
                 appendLine("По умолчанию отвечай без упоминаний. Упоминай кого-то только если уместно по смыслу вопроса; не выдумывай имена вне списка.")
-                for (p in others) {
+                for (p in participants) {
                     appendLine()
                     append(p.nickname)
                     append(':')
@@ -142,12 +121,10 @@ object TrainerService {
     private fun performAsk(
         telegramUserId: Long,
         userMessage: String,
-        history: List<AiChatService.Message>,
         system: String,
         promptForLog: String,
         startedAt: Long,
         strategy: String,
-        saveHistory: Boolean,
     ): String? {
         if (!AiChatService.isConfigured) {
             auditLog.warn(
@@ -160,11 +137,10 @@ object TrainerService {
             return null
         }
 
-        val messages = buildList {
-            add(AiChatService.Message("system", system))
-            addAll(history)
-            add(AiChatService.Message("user", userMessage))
-        }
+        val messages = listOf(
+            AiChatService.Message("system", system),
+            AiChatService.Message("user", userMessage),
+        )
 
         val rawAnswer = AiChatService.complete(messages)
         if (rawAnswer == null) {
@@ -192,14 +168,6 @@ object TrainerService {
                 truncateForLog(rawAnswer, RESPONSE_LOG_MAX),
             )
             return null
-        }
-
-        if (saveHistory) {
-            val next = (history + listOf(
-                AiChatService.Message("user", userMessage),
-                AiChatService.Message("assistant", answer),
-            )).takeLast(MAX_HISTORY_MESSAGES)
-            historyByUser[telegramUserId] = next
         }
 
         auditLog.info(
