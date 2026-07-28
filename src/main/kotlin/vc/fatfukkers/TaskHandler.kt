@@ -17,6 +17,7 @@ import vc.fatfukkers.service.JokesService
 import vc.fatfukkers.service.NewsRegion
 import vc.fatfukkers.service.NewsService
 import vc.fatfukkers.service.TelegramAnimationSender
+import vc.fatfukkers.service.TrainerMessageFormatter
 import vc.fatfukkers.service.TrainerMessageRegistry
 import vc.fatfukkers.service.TrainerQueue
 import vc.fatfukkers.service.ChatParticipantService
@@ -465,11 +466,6 @@ internal fun buildTrainerQuery(
 private const val TRAINER_TYPING_REFRESH_MS = 4_000L
 private const val TELEGRAM_MESSAGE_MAX = 4096
 
-private fun escapeHtmlForTelegram(text: String): String =
-    text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-
 private fun Bot.sendTrainerMessage(
     chatId: ChatId,
     text: String,
@@ -510,7 +506,7 @@ private fun Bot.sendTrainerAnswer(
         {
             sendMessage(
                 chatId = chatId,
-                text = if (preformattedHtml) text else escapeHtmlForTelegram(text),
+                text = if (preformattedHtml) text else TrainerMessageFormatter.formatForTelegramHtml(text),
                 parseMode = ParseMode.HTML,
                 replyParameters = replyTo(replyToMessageId, allowWithoutReply = true),
             )
