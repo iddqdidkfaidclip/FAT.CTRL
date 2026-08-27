@@ -31,6 +31,9 @@ object VideoDownloadService {
     private val cookiesPath = EnvConfig.get("IG_COOKIES_PATH")
     private val youtubeCookiesPath = EnvConfig.get("YTDLP_YT_COOKIES_PATH")
     private val jsRuntime = EnvConfig.get("YTDLP_JS_RUNTIME")
+    @Volatile
+    private var lastCommandError: String? = null
+    private val ytdlpCommand: List<String>? by lazy { resolveYtdlpCommand() }
 
     private val youtubePlayerClientAttempts = listOf(
         "web,mweb,android",
@@ -83,10 +86,14 @@ object VideoDownloadService {
             Files.createDirectories(tempDir)
             YoutubeNewPipeDownloader.ensureInitialized()
             val removed = cleanupTempDir()
+            val ytdlp = ytdlpCommand
+            if (ytdlp == null) {
+                logger.error("yt-dlp is not runnable: {}", lastCommandError ?: "not found on PATH")
+            }
             logger.info(
                 "Video download: ytdlp={} galleryDl={} ffmpeg={} cookies={} jsRuntime={} tempDir={} " +
                     "maxDurationSec={} maxDownloadMb={} staleFilesRemoved={}",
-                ytdlpPath,
+                ytdlp?.joinToString(" ") ?: "$ytdlpPath (MISSING)",
                 galleryDlPath,
                 ffmpegPath ?: "(PATH)",
                 cookiesPath ?: "(none)",
@@ -105,8 +112,8 @@ object VideoDownloadService {
         downloadFail(reason, pingAdmin)
 
     fun download(url: String): DownloadOutcome {
-        if (!isYtdlpAvailable()) {
-            return DownloadOutcome.Err(downloadFail("на сервере не установлен yt-dlp"))
+        if (ytdlpCommand == null) {
+            return DownloadOutcome.Err(ytdlpMissingMessage())
         }
 
         val resolved = resolvedDownloadUrl(url)
@@ -169,8 +176,6 @@ object VideoDownloadService {
     }
 
     private fun newId(): String = UUID.randomUUID().toString()
-
-    private fun isYtdlpAvailable(): Boolean = isCommandAvailable(ytdlpPath)
 
     private fun validateBeforeDownload(metadata: VideoMetadata): DownloadOutcome.Err? {
         metadata.durationSec?.let { duration ->
@@ -405,8 +410,7 @@ object VideoDownloadService {
             return VideoMetadata(title = "Instagram", durationSec = null, filesizeApprox = null)
         }
 
-        val args = mutableListOf(
-            ytdlpPath,
+        val args = ytdlpArgs() + listOf(
             "--no-warnings",
             "-s",
             "--print", "title:%(title)s",
@@ -515,9 +519,12 @@ object VideoDownloadService {
 
     private val videoExtensions = setOf("mp4", "mov", "webm", "mkv", "m4v")
 
+    private fun ytdlpArgs(): MutableList<String> =
+        (ytdlpCommand ?: listOf(ytdlpPath)).toMutableList()
+
     private fun baseArgs(output: String, url: String): MutableList<String> {
-        val args = mutableListOf(
-            ytdlpPath,
+        val args = ytdlpArgs()
+        args += listOf(
             "--no-warnings",
             "--newline",
             "--max-filesize", "45M",
@@ -663,18 +670,54 @@ object VideoDownloadService {
         return downloadFail("карусель — обнови cookies (IG_COOKIES_PATH)")
     }
 
+    private fun ytdlpMissingMessage(): String {
+        val err = lastCommandError.orEmpty()
+        if (err.contains("spawn helper", ignoreCase = true) ||
+            err.contains("jspawnhelper", ignoreCase = true) ||
+            err.contains("Failed to exec", ignoreCase = true)
+        ) {
+            return downloadFail("после обновления Java бот не может запустить yt-dlp — нужен restart сервиса")
+        }
+        return downloadFail("на сервере не установлен yt-dlp")
+    }
+
+    private fun ytdlpCandidates(): List<List<String>> {
+        val configured = ytdlpPath.trim()
+        val candidates = mutableListOf<List<String>>()
+        if (configured.isNotEmpty()) {
+            candidates += if (configured.contains(' ')) {
+                configured.split(Regex("\\s+"))
+            } else {
+                listOf(configured)
+            }
+        }
+        candidates += listOf(
+            listOf("yt-dlp"),
+            listOf("/usr/local/bin/yt-dlp"),
+            listOf("/usr/bin/yt-dlp"),
+            listOf("python3", "-m", "yt_dlp"),
+        )
+        return candidates.distinctBy { it.joinToString("\u0000") }
+    }
+
+    private fun resolveYtdlpCommand(): List<String>? =
+        ytdlpCandidates().firstOrNull { isCommandAvailable(it) }
+
     private fun isCommandAvailable(command: List<String>): Boolean = try {
         val process = ProcessBuilder(command + "--version")
             .redirectErrorStream(true)
             .start()
         val finished = process.waitFor(15, TimeUnit.SECONDS)
-        finished && process.exitValue() == 0
+        val ok = finished && process.exitValue() == 0
+        if (!ok) {
+            lastCommandError = if (finished) "exit=${process.exitValue()}" else "timeout"
+        }
+        ok
     } catch (e: Exception) {
-        logger.debug("Command not available: {}", command.joinToString(" "), e)
+        lastCommandError = e.message
+        logger.warn("Command not available: {} ({})", command.joinToString(" "), e.message)
         false
     }
-
-    private fun isCommandAvailable(command: String): Boolean = isCommandAvailable(listOf(command))
 
     private fun needsInstagramCookies(output: String): Boolean =
         output.contains("login", ignoreCase = true) ||

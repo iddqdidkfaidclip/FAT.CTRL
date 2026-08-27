@@ -9,6 +9,19 @@ pluginManagement {
 
 }
 
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
+dependencyResolutionManagement {
+    repositories {
+        // Репозитории для зависимостей проекта
+        mavenCentral()
+        maven("https://jitpack.io")
+        google()
+    }
+}
+
 dependencyResolutionManagement {
     repositories {
         // Репозитории для зависимостей проекта
